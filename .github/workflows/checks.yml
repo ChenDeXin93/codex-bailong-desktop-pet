@@ -17,4 +17,4 @@ jobs:
           cache-dependency-path: requirements-enhanced.txt
       - run: python -m pip install -r requirements-enhanced.txt
       - run: python -m compileall -q app
-      - run: python -m unittest test_quota_summary_data test_spring_motion test_status_reactions.SchedulerTests test_ring_metrics
+      - run: python -m unittest test_quota_summary_data test_spring_motion test_status_reactions.SchedulerTests test_ring_metrics test_work_actions test_sustained_reactions test_soft_curves_navigation test_release_version

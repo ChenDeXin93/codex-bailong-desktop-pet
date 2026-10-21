@@ -49,7 +49,8 @@ class ActivityThread(QThread):
         from codex_live_status import LiveStatusReader
         self.live_reader=LiveStatusReader(self.stop,
             lambda sid,on,turn:self.live_events.put(('compacting',sid,on,turn)),
-            lambda sid,reason,turn:self.live_events.put(('waiting',sid,reason,turn)))
+            lambda sid,reason,turn:self.live_events.put(('waiting',sid,reason,turn)),
+            lambda sid,on,turn:self.live_events.put(('activity',sid,on,turn)))
         self.live_reader.start()
         while not self.stop.is_set():
             if time.monotonic()-self.last_presence_scan>=5:
@@ -81,6 +82,8 @@ class ActivityThread(QThread):
                 while not self.live_events.empty():
                     phase,sid,value,turn=self.live_events.get_nowait();target=self.targets.alias(sid)
                     if target in self.tail.reducer.sessions:
+                        if phase=='activity':
+                            batch.append(dict(kind='animation_lifecycle',session=target,turn=turn,active=value));continue
                         apply=self.tail.reducer.set_waiting if phase=='waiting' else self.tail.reducer.set_compacting
                         batch.extend(apply(target,value,turn))
                 if time.monotonic()-self.last_name_scan>=3:

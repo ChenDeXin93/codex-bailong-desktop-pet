@@ -83,8 +83,8 @@ def all_items(manifest):
     result=[manifest['idle']]+manifest.get('additionalIdleAnimations',[])+manifest.get('variants',[])
     for key in ('dragAnimation','landingAnimation','quotaAnimation'):
         if manifest.get(key):result.append(manifest[key])
-    for group in ('clickAnimations','moveAnimations','turnAnimations'):
-        result.extend(manifest.get(group,[]))
+    for group in ('clickAnimations','moveAnimations','turnAnimations','workAnimations'):
+        result.extend(v for v in manifest.get(group,[]) if isinstance(v,dict))
     unique={str(v.get('playbackFile') or v.get('file')):v for v in result}
     return list(unique.values())
 
@@ -205,7 +205,8 @@ def open_codex(session=None):
     alias=Path(os.environ.get('LOCALAPPDATA',''))/'Microsoft/WindowsApps/Codex.exe'
     if alias.is_file():os.startfile(alias);return
     script="Get-StartApps | Where-Object { $_.Name -eq 'Codex' } | Select-Object -First 1 -ExpandProperty AppID"
-    result=subprocess.run(['powershell.exe','-NoProfile','-Command',script],capture_output=True,text=True,creationflags=0x08000000)
+    try:result=subprocess.run(['powershell.exe','-NoProfile','-Command',script],capture_output=True,text=True,timeout=8,creationflags=0x08000000)
+    except subprocess.TimeoutExpired:raise OSError('查找 Codex 安装超时，请从开始菜单打开后重试') from None
     appid=result.stdout.strip()
     if not appid:raise OSError('未找到 Codex 安装，请先从开始菜单打开一次')
     os.startfile('shell:AppsFolder\\'+appid)

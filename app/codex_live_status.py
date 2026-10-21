@@ -159,14 +159,28 @@ def waiting_state(state):
     return reason,turn.get('turnId') or ''
 
 class LifecycleProjection:
-    def __init__(self,emit,emit_waiting=None):
+    def __init__(self,emit,emit_waiting=None,emit_activity=None):
         self.emit=emit;self.emit_waiting=emit_waiting;self.states={};self.revisions={};self.phases={};self.waiting={}
+        self.emit_activity=emit_activity;self.activity_sent={};self.next_heartbeat=0
+    def heartbeat(self,now,force=None):
+        if self.emit_activity is None:return
+        if force is None:
+            if now<self.next_heartbeat:return
+        for sid,state in self.states.items():
+            if force is not None and sid!=force:continue
+            turn=latest_turn(state) or {};runtime=state.get('threadRuntimeStatus') or {}
+            value=(turn.get('turnId') or '',turn.get('status')=='inProgress' and runtime.get('type')=='active')
+            previous=self.activity_sent.get(sid)
+            if previous and previous[:2]==value and now-previous[2]<15:continue
+            self.activity_sent[sid]=(*value,now);self.emit_activity(sid,value[1],value[0])
+        self.next_heartbeat=min((v[2]+15 for v in self.activity_sent.values()),default=now+15)
     def forget(self,sid,clear=True):
         phase=self.phases.pop(sid,None) if clear else self.phases.get(sid)
         if clear and phase and phase[0]:self.emit(sid,False,phase[1])
         waiting=self.waiting.pop(sid,None) if clear else self.waiting.get(sid)
         if clear and waiting and waiting[0] and self.emit_waiting:self.emit_waiting(sid,'',waiting[1])
         self.states.pop(sid,None);self.revisions.pop(sid,None)
+        self.activity_sent.pop(sid,None)
     def accept(self,envelope,wanted):
         p=envelope.params
         if envelope.type!='broadcast' or envelope.method!='thread-stream-state-changed' or envelope.version!=11 or not p or p.hostId!='local' or p.conversationId not in wanted or not p.change:return
@@ -185,6 +199,7 @@ class LifecycleProjection:
         waiting=waiting_state(self.states[sid]);previous=self.waiting.get(sid)
         self.waiting[sid]=waiting
         if self.emit_waiting and waiting!=previous and (waiting[0] or previous and previous[0]):self.emit_waiting(sid,*waiting)
+        self.heartbeat(time.monotonic(),force=sid)
         return 'accepted'
 
 class Frames:
@@ -201,8 +216,9 @@ class Frames:
         if offset:del self.buffer[:offset]
 
 class LiveStatusReader(threading.Thread):
-    def __init__(self,stop,emit,emit_waiting=None):
+    def __init__(self,stop,emit,emit_waiting=None,emit_activity=None):
         super().__init__(name='BailongCodexLifecycle',daemon=True);self.stop_event=stop;self.emit=emit;self.emit_waiting=emit_waiting
+        self.emit_activity=emit_activity
         self._targets=();self.lock=threading.Lock();self.connected=False
         self._health=dict(state='unknown',code='starting')
     def set_health(self,state,code,success_at=None):
@@ -234,7 +250,7 @@ class LiveStatusReader(threading.Thread):
             finally:self.connected=False
             self.stop_event.wait(5)
     def _listen(self,pipe,available):
-        client='';followed=set();frames=Frames();projection=LifecycleProjection(self.emit,self.emit_waiting);resync_at={}
+        client='';followed=set();frames=Frames();projection=LifecycleProjection(self.emit,self.emit_waiting,self.emit_activity);resync_at={}
         def send(message):
             raw=msgspec.json.encode(message);packet=struct.pack('<I',len(raw))+raw
             while packet:
@@ -252,6 +268,7 @@ class LiveStatusReader(threading.Thread):
                     for sid in followed-wanted:follow(sid,False);projection.forget(sid,clear=False)
                     for sid in wanted-followed:follow(sid,True)
                     followed=wanted
+                    projection.heartbeat(time.monotonic())
                 count=available()
                 if not count:self.stop_event.wait(.05);continue
                 for raw in frames.feed(pipe.read(min(count,1024*1024))):
@@ -270,6 +287,7 @@ class LiveStatusReader(threading.Thread):
                             self.set_health('degraded','ipc_protocol')
                         if result=='resync' and envelope.params:
                             sid=envelope.params.conversationId;now=time.monotonic()
+                            projection.forget(sid,clear=False)
                             if now-resync_at.get(sid,-1e9)>=10:
                                 resync_at[sid]=now;follow(sid,False);follow(sid,True)
                     # A long conversation's initial frame can be large. Do not

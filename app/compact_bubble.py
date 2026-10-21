@@ -276,10 +276,11 @@ class StatusScroller(QLabel):
         left=self.text_left()
         if self.conversation_title:
             if self.name_hovered or self.name_pressed:
-                p.setRenderHint(QPainter.RenderHint.Antialiasing);p.setPen(Qt.PenStyle.NoPen)
-                p.setBrush(QColor('#d9cce6' if self.name_pressed else '#ece3f3'));p.drawRoundedRect(QRectF(1,1,left-4,self.height()-2),4,4)
+                p.setRenderHint(QPainter.RenderHint.Antialiasing);p.setPen(QPen(QColor('#806095' if self.name_pressed else '#a087b3'),1))
+                p.setBrush(QColor('#c5add9' if self.name_pressed else '#dfcfeb'));p.drawRoundedRect(QRectF(1,1,left-4,self.height()-2),4,4)
             offset=1 if self.name_pressed else 0
-            p.setFont(font(11,True));p.setPen(QColor('#493557' if self.name_pressed else '#5a406f' if self.name_hovered else '#665078'))
+            title_font=font(11,True);title_font.setUnderline(self.name_hovered or self.name_pressed)
+            p.setFont(title_font);p.setPen(QColor('#30203e' if self.name_pressed else '#472c5d' if self.name_hovered else '#665078'))
             p.drawText(QRectF(5+offset,offset,self.title_width,self.height()),Qt.AlignmentFlag.AlignVCenter,self.short_title)
             p.setPen(QColor('#c1b4cc'));p.drawLine(left-5,5,left-5,self.height()-5)
         p.setFont(self.font());p.setPen(INK);p.setClipRect(left,0,max(0,self.width()-left-(30 if self.extra else 0)),self.height())

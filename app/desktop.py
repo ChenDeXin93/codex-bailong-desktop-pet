@@ -45,6 +45,10 @@ class DesktopPet(EnhancedPet):
         self.character_dir=STATE_DIR/'characters';self.character_dir.mkdir(exist_ok=True)
         self.created_at=time.monotonic();self.decode_error=None
         super().__init__(monitor)
+        from codex_navigation import CodexNavigation
+        self.codex_navigation=CodexNavigation(lambda session:open_codex(session),self)
+        self.codex_navigation.error.connect(lambda text:self.say(text,6000))
+        self.reactions.set_actions(item['id'] for item in all_items(self.manifest))
         self.bubble.reportRequested.connect(self.open_report)
         self.bubble.settingsRequested.connect(self.open_settings)
         self.bubble.chatRequested.connect(self.open_chat)
@@ -117,7 +121,8 @@ class DesktopPet(EnhancedPet):
                 mode=self.mode;self.gate.state=mode;self.play(self.current,mode);return
             previous=self.mode;self.gate.finish();now=time.monotonic()
             if previous!='idle':
-                self.reactions.finished(now,max(8,self.settings.get('action_gap',2)))
+                dedicated=previous=='reaction' and str(self.current.get('id','')).startswith('work')
+                self.reactions.finished(now,max(2 if dedicated else 8,self.settings.get('action_gap',2)))
                 self.buffer_until=now+max(.8,self.settings.get('action_gap',2))
             if previous in ('click','landing','task','quota','reaction'):self.next_chain=self.buffer_until+self.settings.get('random_interval',25)
             if self.play_status_reaction(now):return
@@ -201,7 +206,7 @@ class DesktopPet(EnhancedPet):
 
     def single_click(self):
         self.last_click=None;self.press_feedback=time.monotonic()
-        pool=self.manifest.get('clickAnimations') or [v for v in self.variants if v['id'] in ('01','08','09','10','11') ] or self.variants or self.idles
+        pool=self.manifest.get('clickAnimations') or [v for v in self.variants if v['id'] in ('01','08','09','10','11','17','20','26') ] or self.variants or self.idles
         self.choose(random.choice(pool),interactive=True)
 
     def say(self,text,ms=4000):
@@ -288,6 +293,8 @@ class DesktopPet(EnhancedPet):
 
     @measured('ui_activity')
     def on_activity(self,event):
+        if event.get('kind')=='animation_lifecycle':
+            self.reactions.confirm(event.get('session',''),event.get('turn',''),event.get('active',False),time.monotonic());return
         if event.get('kind')=='connection_health':
             self.update_connection_health(event.get('capabilities',{}));return
         if event.get('kind')=='conversation_names':
@@ -301,6 +308,7 @@ class DesktopPet(EnhancedPet):
             self.bubble.roster.observe(event)
         if event.get('kind') in ('status','complete'):self.bubble.task_updated(event)
         elif event.get('kind')=='codex_presence':
+            self.reactions.present=event.get('open')
             self.bubble.codex_open=event.get('open');self.bubble.evaluate_mode();return
         if event.get('kind')=='complete':
             title=clean_text(event.get('title','Codex 任务'),70)
@@ -464,7 +472,7 @@ class DesktopPet(EnhancedPet):
     def action_groups(self):
         return {'待机':self.idles,'转向':self.manifest.get('turnAnimations',[]),'移动':self.manifest.get('moveAnimations',[]),
             '点击回应':self.manifest.get('clickAnimations') or [v for v in self.variants if v['id'] in ('01','08','09','10','11')],
-            '随机动作':self.variants,'额度回应（不刷新数据）':[self.manifest['quotaAnimation']] if self.manifest.get('quotaAnimation') else [],
+            '互动动作':self.variants,'工作动作':[v for v in self.manifest.get('workAnimations',[]) if v], '额度回应（不刷新数据）':[self.manifest['quotaAnimation']] if self.manifest.get('quotaAnimation') else [],
             '拖拽':[self.manifest['dragAnimation']] if self.manifest.get('dragAnimation') else [],
             '落地':[self.manifest['landingAnimation']] if self.manifest.get('landingAnimation') else []}
     def populate_tray(self):self.build_menu(self.tray_menu,tray=True)
@@ -537,11 +545,11 @@ class DesktopPet(EnhancedPet):
     def open_chat_service(self):
         self.open_chat();self.chat_window.provider()
     def open_assistant(self):
-        try:open_codex()
+        try:self.codex_navigation.open()
         except OSError as error:self.say(str(error),6000)
     def open_conversation(self,session):
         self.recently_visited=getattr(self,'recently_visited',{});self.recently_visited[session]=time.monotonic()
-        try:open_codex(session)
+        try:self.codex_navigation.open(session)
         except OSError as error:self.say(str(error),6000)
     def open_data(self):QDesktopServices.openUrl(QUrl.fromLocalFile(str(STATE_DIR)))
     def character_choices(self):
@@ -570,17 +578,22 @@ class DesktopPet(EnhancedPet):
         self.stop_walk();self.throwing=False;self.gate.state='idle'
         try:
             self.asset_root=root;self.manifest=m;self.idles=[m['idle']]+m.get('additionalIdleAnimations',[]);self.variants=m.get('variants',[])
+            self.reactions.set_actions(item['id'] for item in all_items(m))
             self.idle()
         except Exception:
-            self.asset_root,self.manifest,self.idles,self.variants,_=old;self.gate.state='idle';self.idle();raise
+            self.asset_root,self.manifest,self.idles,self.variants,_=old
+            self.reactions.set_actions(item['id'] for item in all_items(self.manifest))
+            self.gate.state='idle';self.idle();raise
         self.settings['character']=key
         self.apply_settings(self.settings['character_preferences'].get(key,{}))
+        self.codex_navigation.close()
         if self.bubble.report:self.bubble.report.animation.stop();self.bubble.report.hide()
         if self.chat_window:self.chat_window.shutdown();self.chat_window.deleteLater();self.chat_window=None
     def export_diagnostics(self):
         self.record_state();path=ROOT/('白龙诊断-'+time.strftime('%Y%m%d-%H%M%S')+'.json')
         value=json.loads((STATE_DIR/'runtime.json').read_text(encoding='utf-8'))
         value['asset_count']=len(all_items(self.manifest));value['decode_error']=self.decode_error
+        value['work_animation_count']=len([v for v in self.manifest.get('workAnimations',[]) if v]);value['semantic_work_actions']=True;value['explicit_task_arrival_animation']=True
         atomic_json(path,value);self.say('诊断已保存：'+path.name,6000)
     def backup_settings(self):
         path=STATE_DIR/('settings-backup-'+time.strftime('%Y%m%d-%H%M%S')+'.json');self.save_settings();shutil.copy2(CONFIG,path)
@@ -594,6 +607,12 @@ class DesktopPet(EnhancedPet):
         except (OSError,ValueError) as error:QMessageBox.warning(self.settings_dialog,'恢复失败',str(error))
     def record_state(self):
         path=STATE_DIR/'runtime.json';value=super().runtime_state()
+        value.update(asset_count=len(all_items(self.manifest)),work_animation_count=len([v for v in self.manifest.get('workAnimations',[]) if v]),
+            semantic_work_actions=True,explicit_task_arrival_animation=True,current_animation=self.current.get('id') if self.current else None,
+            sustained_work_response=True,status_action_interval=self.reactions.interval,animation_lifecycle_leases=len(self.reactions.leases),
+            smoothed_token_curves=True,conversation_hover_contrast=True,asynchronous_codex_navigation=True,
+            last_reaction_kind=self.last_reaction.kind if self.last_reaction else None,
+            pending_task_greetings=len(self.reactions.openings),animation_decoder_queue=self.player.frames.qsize() if self.player else 0)
         import psutil
         process=psutil.Process();mem=process.memory_info()
         snapshot=self.bubble.token_snapshot or {}
@@ -601,7 +620,7 @@ class DesktopPet(EnhancedPet):
         from typography import LATIN_FAMILY,register_font
         report=self.bubble.report
         report_data=snapshot.get('report') or {}
-        value.update(ui_revision=59,hourly_token_entry='today_tokens',unified_refresh=True,icon_only_header_actions=True,refresh_icon_style='single_arc',icon_motion_speed=1.2,busy_icon_style='orbit_rings',status_icon_morph=True,status_waiting_live_flags=True,island_quota_segmented=False,island_quota_style='open_arc',island_quota_numeric_only=True,native_shrink_landing=True,shrink_preserves_chart_progress=True,native_landing_hold_ms=34,cached_chart_layers=True,stable_report_scrollbar=True,animated_deck_tabs=True,incremental_deck_switch=True,prewarmed_transition_landing=True,monotone_container_motion=True,status_updates_preserve_surface=True,capsule_pixel_handoff=True,atomic_transition_handoff=True,clean_report_dismiss=True,stable_disclosure_gutter=True,unified_card_motion=True,report_continuous_shape=True,animated_disclosures=True,week_quota_palette=True,continuous_surface_morph=True,shared_status_glyph=True,apple_island_reference=True,panel_shrink_spring=True,panel_dismiss_spring=True,panel_shrink_ms=440,panel_dismiss_ms=360,lossless_asset_pack=True,lightweight_maintenance=True,optional_webm_converter=True,shared_version_assets=True,fair_activity_targets=True,persistent_completion_ledger=True,cached_log_discovery=True,chat_incremental_stream=True,installation_ready_receipt=True,semantic_controls=True,labeled_header_actions=False,editor_keyboard_save=True,capability_health=True,connection_path_picker=True,report_scope_groups=True,report_model_filter_explicit=True,settings_draft_merge=True,settings_dirty_fields_only=True,context_menu_root_items=8,tray_recovery_menu=True,editor_returns_to_origin=True,chat_destructive_confirmation=True,quota_query_silent=True,subagent_completion_filter=True,ring_persistent_legend=False,quota_display_layout='labeled_bars',quota_reset_per_window=True,today_tokens_direct_value=True,book_reference_count=27,island_click_opens_normal=True,conversation_name_pointer_feedback=True,context_compaction_tracking=True,conversation_name_navigation=True,codex_live_status_connected=bool(self.activity and self.activity.live_reader and self.activity.live_reader.connected),daily_report_incremental_updates=True,daily_report_chart_start_after_show=True,quota_source_header_visible=False,incremental_status_refresh=True,skip_unchanged_log_reads=True,single_runtime_write=True,read_acknowledgement_history=True,read_acknowledgement_settle_seconds=4,conversation_names_visible=True,completed_conversation_background=True,independent_conversation_scroll=True,operation_status_summary=True,session_read_tracking=True,conversation_status_limit=2,codex_connection_diagnostics=True,portable_codex_discovery=True,island_bubble=True,island_quota_priority=True,bubble_mode=self.bubble.bubble_mode,bubble_auto_compact=self.bubble.auto_compact,island_visible=self.bubble.is_island(),panel_transition_stable_canvas=True,panel_transition_content_blend=True,chart_entry_animation=True,daily_report=True,daily_report_stable_surface=True,token_scan_background=True,token_models=len({r['model'] for r in report_data.get('daily_models',[])}),token_report_hours=len(report_data.get('hours',[])),daily_report_visible=bool(report and report.isVisible()),daily_report_aligned=not report or not report.isVisible() or (report.content_geometry().width()==self.bubble.width() and report.content_geometry().x()==self.bubble.x() and report.content_geometry().bottom()+1==self.bubble.y()-6),ring_center_y=None,daily_report_open=bool(self.bubble.report and self.bubble.report.requested),inline_explanations_only=True,version=VERSION,status_icon_animated=True,status_icon_unread=len(self.bubble.status_indicator.unread),status_icon_acknowledgement=True,status_icon_state=self.bubble.status_indicator.visual(),status_icon_timer=self.bubble.status_indicator.timer.isActive(),panel_transition_no_fade=True,panel_transition_staged_layout=True,panel_transition_ms=480,idle_cache_mb=round(idle_cache['bytes']/1048576,2),idle_cache_limit_mb=idle_cache['limit']/1048576,idle_cache_hits=idle_cache['hits'],integrated_panels=True,panel_page=self.bubble.panel_page,separate_panel_windows=sum(bool(p and p.isWindow()) for p in (self.settings_dialog,self.chat_window)),expanded_details_grouped=True,latin_font=LATIN_FAMILY,latin_font_loaded=register_font(),status_height_transition_ms=300,status_transition_synchronized=True,token_chart_range=self.bubble.token_range,
+        value.update(ui_revision=61,hourly_token_entry='today_tokens',unified_refresh=True,icon_only_header_actions=True,refresh_icon_style='single_arc',icon_motion_speed=1.2,busy_icon_style='orbit_rings',status_icon_morph=True,status_waiting_live_flags=True,island_quota_segmented=False,island_quota_style='open_arc',island_quota_numeric_only=True,native_shrink_landing=True,shrink_preserves_chart_progress=True,native_landing_hold_ms=34,cached_chart_layers=True,stable_report_scrollbar=True,animated_deck_tabs=True,incremental_deck_switch=True,prewarmed_transition_landing=True,monotone_container_motion=True,status_updates_preserve_surface=True,capsule_pixel_handoff=True,atomic_transition_handoff=True,clean_report_dismiss=True,stable_disclosure_gutter=True,unified_card_motion=True,report_continuous_shape=True,animated_disclosures=True,week_quota_palette=True,continuous_surface_morph=True,shared_status_glyph=True,apple_island_reference=True,panel_shrink_spring=True,panel_dismiss_spring=True,panel_shrink_ms=440,panel_dismiss_ms=360,lossless_asset_pack=True,lightweight_maintenance=True,optional_webm_converter=True,shared_version_assets=True,fair_activity_targets=True,persistent_completion_ledger=True,cached_log_discovery=True,chat_incremental_stream=True,installation_ready_receipt=True,semantic_controls=True,labeled_header_actions=False,editor_keyboard_save=True,capability_health=True,connection_path_picker=True,report_scope_groups=True,report_model_filter_explicit=True,settings_draft_merge=True,settings_dirty_fields_only=True,context_menu_root_items=8,tray_recovery_menu=True,editor_returns_to_origin=True,chat_destructive_confirmation=True,quota_query_silent=True,subagent_completion_filter=True,ring_persistent_legend=False,quota_display_layout='labeled_bars',quota_reset_per_window=True,today_tokens_direct_value=True,book_reference_count=27,island_click_opens_normal=True,conversation_name_pointer_feedback=True,context_compaction_tracking=True,conversation_name_navigation=True,codex_live_status_connected=bool(self.activity and self.activity.live_reader and self.activity.live_reader.connected),daily_report_incremental_updates=True,daily_report_chart_start_after_show=True,quota_source_header_visible=False,incremental_status_refresh=True,skip_unchanged_log_reads=True,single_runtime_write=True,read_acknowledgement_history=True,read_acknowledgement_settle_seconds=4,conversation_names_visible=True,completed_conversation_background=True,independent_conversation_scroll=True,operation_status_summary=True,session_read_tracking=True,conversation_status_limit=2,codex_connection_diagnostics=True,portable_codex_discovery=True,island_bubble=True,island_quota_priority=True,bubble_mode=self.bubble.bubble_mode,bubble_auto_compact=self.bubble.auto_compact,island_visible=self.bubble.is_island(),panel_transition_stable_canvas=True,panel_transition_content_blend=True,chart_entry_animation=True,daily_report=True,daily_report_stable_surface=True,token_scan_background=True,token_models=len({r['model'] for r in report_data.get('daily_models',[])}),token_report_hours=len(report_data.get('hours',[])),daily_report_visible=bool(report and report.isVisible()),daily_report_aligned=not report or not report.isVisible() or (report.content_geometry().width()==self.bubble.width() and report.content_geometry().x()==self.bubble.x() and report.content_geometry().bottom()+1==self.bubble.y()-6),ring_center_y=None,daily_report_open=bool(self.bubble.report and self.bubble.report.requested),inline_explanations_only=True,version=VERSION,status_icon_animated=True,status_icon_unread=len(self.bubble.status_indicator.unread),status_icon_acknowledgement=True,status_icon_state=self.bubble.status_indicator.visual(),status_icon_timer=self.bubble.status_indicator.timer.isActive(),panel_transition_no_fade=True,panel_transition_staged_layout=True,panel_transition_ms=480,idle_cache_mb=round(idle_cache['bytes']/1048576,2),idle_cache_limit_mb=idle_cache['limit']/1048576,idle_cache_hits=idle_cache['hits'],integrated_panels=True,panel_page=self.bubble.panel_page,separate_panel_windows=sum(bool(p and p.isWindow()) for p in (self.settings_dialog,self.chat_window)),expanded_details_grouped=True,latin_font=LATIN_FAMILY,latin_font_loaded=register_font(),status_height_transition_ms=300,status_transition_synchronized=True,token_chart_range=self.bubble.token_range,
             token_history_days=len(snapshot.get('history_days',{})),token_hour_slots=len(snapshot.get('hours',[])),
             mode=self.mode,action_state=self.gate.state,mouse_through=self.settings['mouse_through'],scale=self.settings['scale'],
             facing=self.walk_direction,decoder_queue=self.player.frames.qsize() if self.player else 0,first_frame_cache=len(self.player.first) if self.player else 0,

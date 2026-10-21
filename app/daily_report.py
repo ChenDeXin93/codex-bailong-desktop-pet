@@ -10,6 +10,7 @@ from token_calendar import compact_tokens
 from token_analytics import model_series,token_analogy
 from book_reference import analogy as book_analogy,catalog as book_catalog
 from chart_reveal import ChartReveal,RasterChart
+from chart_curve import SmoothTrace
 from spring_motion import island_response,dismiss_progress,EXPAND_MS,DISMISS_MS
 from card_motion import card_geometry,paint_card
 
@@ -89,12 +90,12 @@ class ReportPlot(QWidget,RasterChart):
             p.setPen(MUTED)
             baseline=y+(self._axis_metrics.ascent()-self._axis_metrics.descent())/2
             p.drawText(QPointF(chart.left()-6-self._axis_metrics.horizontalAdvance(text),baseline),text)
-        slot=chart.width()/max(1,len(values));points=[];self.points=points;path=QPainterPath();static=p;p=dynamic
+        slot=chart.width()/max(1,len(values));points=[];self.points=points;self.curve=None;path=QPainterPath();static=p;p=dynamic
         if self.mode=='line':
             for i,value in enumerate(values):
                 point=QPointF(chart.left()+(i+.5)*chart.width()/24,bottom-chart.height()*value/max(1,top));points.append(point)
-                path.moveTo(point) if i==0 else path.lineTo(point)
                 self.hits.append((QRectF(point.x()-slot/2,chart.top(),slot,chart.height()),f"{i:02}:00–{i+1:02}:00 · {value:,} Tokens"))
+            self.curve=SmoothTrace(points);path=self.curve.path
             fill=QPainterPath(path);fill.lineTo(points[-1].x(),bottom);fill.lineTo(points[0].x(),bottom);fill.closeSubpath();p.fillPath(fill,QColor('#ebe2f2'))
             p.setPen(QPen(QColor(COLORS[0]),2,Qt.PenStyle.SolidLine,Qt.PenCapStyle.RoundCap,Qt.PenJoinStyle.RoundJoin));p.drawPath(path)
             labels=[(0,'00'),(.5,'12'),(1,'24时')]

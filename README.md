@@ -2,7 +2,7 @@
 
 ![文章海报](docs/media/cover.png)
 
-一只陪你使用 Codex 的 Windows 白龙桌宠：在桌面查看任务状态、接收完成提醒、追踪账户额度和 Token 用量。基于 [jingh12312-rgb/bailong-desktop-pet](https://github.com/jingh12312-rgb/bailong-desktop-pet) 持续改造，当前版本 **v0.6.50 / UI59**。
+一只陪你使用 Codex 的 Windows 白龙桌宠：在桌面查看任务状态、接收完成提醒、追踪账户额度和 Token 用量。基于 [jingh12312-rgb/bailong-desktop-pet](https://github.com/jingh12312-rgb/bailong-desktop-pet) 持续改造，当前版本 **v0.7.1 / UI61**。
 
 **[下载安装包](https://github.com/Wunsch2048/codex-bailong-desktop-pet/releases/latest)** · [快速部署](docs/快速部署说明.txt) · [全部新增功能](docs/新增功能说明.txt) · [开发说明](docs/DEVELOPMENT.md) · [迭代历史](docs/迭代历史.txt)
 
@@ -18,7 +18,7 @@
 | Token 统计 | 全部、30 天、7 天柱状图；点击今日 Token 查看 24 小时曲线 |
 | 独立日报 | 累计与昨日指标分组、昨日小时曲线、按模型筛选；27 本书的等量比较使用累计 Token 与真实文本计数估算 |
 | 额外重置公告 | 接入 Codex Resets 公告；网站公告与账户实际重置分别显示 |
-| 龙娘互动 | 原有 15 段动作、随机播放、拖动与桌面移动；状态动作等待播放边界，自动动作静音 |
+| 龙娘互动 | 25 段动作，含新增五段工作和五段互动；工作动作对应 Codex 状态定期续播，自动动作静音 |
 | 视频全屏让位 | 视频全屏时临时取消置顶；未读完成提醒优先，确认后继续让位；Firefox + B 站已通过实际播放采样 |
 | 日常使用 | 登录自启、托盘找回、连接诊断、自定义角色、集成闲聊、一键安装升级与回退 |
 
@@ -28,13 +28,27 @@
 | --- | --- |
 | ![胶囊展开](docs/report/assets/胶囊展开正常.gif) | ![日报动效](docs/report/assets/日报展开收回.gif) |
 
+### v0.7.1 更新
+
+- 修复并接入上游 v0.4.1 的十段新动作，清理杂边、校准人物尺度并补齐待机衔接；五段工作动作对应新任务、执行、整理、阅读和检查。
+- 专用工作动作默认每12秒检查续播，完整播完后至少停顿2秒；实时回合确认让长时间思考保持响应，确认信号不会重刷气泡文字。
+- 小时 Token 曲线统一柔化，经过真实数据点、保留峰值和零值，入场沿同一路径推进。
+- 会话名悬停和按下增强底色、描边与下划线；会话链接后台唤起、合并重复点击，避免阻塞界面。Codex自身加载耗时仍由Codex决定。
+- 版本第三段用0—9，0.7.9之后为0.8.0。已验证215项相关检查、编译源码一致性及本机安装联动。
+
+![修复后工作动作](docs/media/work-actions.gif)
+
+![曲线与会话反馈对照](docs/media/curves-and-conversation-feedback.png)
+
+具体说明见[本版更新记录](docs/releases/v0.7.1.txt)。图文开发报告对应v0.6.50，后续新增内容以本节和迭代历史为准。
+
 ![任务状态连续变形](docs/report/assets/状态连续变形.gif)
 
 上图展示三圆进行中图标与完成、确认、等待和中断状态的连续变化。截图与界面 GIF 使用隔离演示数据，不包含真实聊天或密钥。
 
 ## 安装与首次连接
 
-1. 从 [Releases](https://github.com/Wunsch2048/codex-bailong-desktop-pet/releases/latest) 下载 `bailong-desktop-pet-0.6.50-windows-x64.zip`，完整解压后运行其中的一键部署 `.exe`。
+1. 从 [Releases](https://github.com/Wunsch2048/codex-bailong-desktop-pet/releases/latest) 下载一键部署包，完整解压后运行其中的 `.exe`。
 2. 安装器为当前 Windows 用户安装、校验并启动，无需 Python 或管理员权限。
 3. 在本机安装并登录 Codex，发送一次消息。桌宠会自动发现本机数据，通常不需要重启 Codex。
 4. 若没有数据，在“设置 → 连接 → 检测连接与额度”检查各项能力；支持手动指定连接路径。
@@ -57,13 +71,13 @@
 ## 开发、报告与反馈
 
 - [从源码运行与构建](docs/DEVELOPMENT.md)：Python 3.12、PySide6、角色素材准备、验证和打包。
-- [下载通俗开发报告（含 GIF）](https://github.com/Wunsch2048/codex-bailong-desktop-pet/releases/download/v0.6.50/bailong-development-report-0.6.50.zip)：解压后用浏览器打开 `development-report/index.html`；[仓库内报告](docs/report/index.html) 也可离线查看，GitHub 页面展示 HTML 源码。
+- [通俗开发报告](docs/report/index.html)：下载仓库后用浏览器打开，可离线查看配图和 GIF；GitHub 页面展示 HTML 源码。
 - [新增功能说明](docs/新增功能说明.txt) 和 [完整迭代历史](docs/迭代历史.txt)：当前能力与已被替换方案分别记录。
 - 遇到问题请 [提交 Issue](https://github.com/Wunsch2048/codex-bailong-desktop-pet/issues/new/choose)，附版本、系统缩放、操作步骤；请先去掉截图和日志里的私密信息。
 
 ## 来源与许可
 
-原项目：[jingh12312-rgb/bailong-desktop-pet](https://github.com/jingh12312-rgb/bailong-desktop-pet)，本地改造基线为 v0.3.3。角色形象、原有动作及基础程序来自原项目；本仓库记录其上的界面、Codex 联动、数据统计、交互和部署增强。
+原项目：[jingh12312-rgb/bailong-desktop-pet](https://github.com/jingh12312-rgb/bailong-desktop-pet)，本地改造基线为 v0.3.3，已合入上游 v0.4.1 的十段新动作。角色形象、原有动作及基础程序来自原项目；本仓库记录其上的界面、Codex 联动、数据统计、交互和部署增强。
 
 发布者已确认取得本次源码、角色素材和安装包公开再分发授权。这不自动授予访问者商业使用、再分发或其他许可。原项目未随基线提供统一代码 LICENSE；本仓库不擅自将整项目标为 MIT。详见 [来源与授权说明](NOTICE.md)、保留的 [原素材说明](docs/upstream/ASSETS.md) 及各依赖许可证。
 

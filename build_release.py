@@ -5,7 +5,9 @@ ROOT=Path(__file__).resolve().parent
 sys.path.insert(0,str(ROOT/'app'))
 from desktop_core import VERSION
 from desktop_services import all_items
+from release_version import validate_new_version
 def build(legacy_formats=False):
+    validate_new_version(VERSION)
     from asset_pack import optimize_all,CACHE
     optimized=optimize_all();optimized_by_id={v['id']:v for v in optimized['files']}
     subprocess.run([sys.executable,'-m','PyInstaller','--noconfirm','--windowed','--onedir','--name','BailongEnhanced','--distpath','release','--workpath','build','--specpath','build','--paths','app','--exclude-module','imageio_ffmpeg','app/enhanced.py'],cwd=ROOT,check=True)
@@ -26,7 +28,11 @@ def build(legacy_formats=False):
         assert record['sourceSha256']==__import__('asset_pack').digest(source) and record['exactRGBA']
         packed=CACHE/(item['id']+'.webp');assert record['outputSha256']==__import__('asset_pack').digest(packed)
         target.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(packed,target)
+    shutil.copy2(ROOT/'状态响应优化/更新说明.txt',release/'持续状态响应说明.txt')
     notes=ROOT/'动作质量修复/原始动作逻辑与质量基准.txt'
+    shutil.copy2(ROOT/'新增动作接入/更新说明.txt',release/'新增动作与Codex联动说明.txt')
+    shutil.copy2(ROOT/'发布说明/版本编号规则.json',release/'版本编号规则.json')
+    shutil.copy2(ROOT/'app/licenses/upstream-v0.4.1-assets.txt',release/'上游v0.4.1素材说明.txt')
     if notes.exists():shutil.copy2(notes,release/'原始动作逻辑与质量基准.txt')
     status_notes=ROOT/'状态联动更新/规则与验收说明.txt'
     if status_notes.exists():shutil.copy2(status_notes,release/'Codex状态联动说明.txt')

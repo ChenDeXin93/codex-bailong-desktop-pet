@@ -106,14 +106,14 @@ class ActivityReducer:
         self.sessions = {}
         self.last_quota = None
 
-    def _status(self,sid,s,activity='commentary',user_message=False):
+    def _status(self,sid,s,activity='commentary',user_message=False,turn_started=False):
         waiting=s.waiting_reason if not s.done else ''
         label={'input':'等待你的输入','approval':'等待你的批准'}.get(waiting)
         return dict(kind='status',session=sid,state='waiting' if waiting else 'working' if s.compacting else s.state,
                     text=label or ('正在压缩上下文' if s.compacting else s.message),title=s.title,turn=s.turn,
                     activity='waiting' if waiting else 'compact' if s.compacting else activity,display=label or ('正在压缩上下文' if s.compacting else s.display),
                     compacting=s.compacting,waiting_reason=waiting,waiting=sum(bool(x.waiting_reason) and not x.done for x in self.sessions.values()),
-                    user_message=user_message,active=sum(not x.done or x.compacting for x in self.sessions.values()))
+                    user_message=user_message,turn_started=turn_started,active=sum(not x.done or x.compacting for x in self.sessions.values()))
 
     def set_waiting(self,sid,reason,turn=''):
         s=self.sessions.setdefault(sid,Session())
@@ -260,11 +260,13 @@ class ActivityReducer:
             if s.state=='thinking':activity='thinking'
             elif s.state=='responding':activity='reply'
             elif s.state not in ('working',):activity=s.state
-            elif kind=='response_item' and typ in ('function_call','custom_tool_call'):activity=tool_activity(p.get('name',''))
+            elif kind=='response_item' and typ in ('function_call','custom_tool_call'):
+                kinds=operation_kinds(p)
+                activity=next((v for v in ('edit','read','research','execute') if v in kinds),tool_activity(p.get('name','')))
             elif kind=='event_msg' and typ=='item_completed':
                 item=p.get('item') or {};it=item.get('type')
                 activity='retry' if item.get('status') in ('failed','error') else {'CommandExecution':'execute','FileChange':'edit','WebSearch':'research','McpToolCall':tool_activity(item.get('name',item.get('tool_name','')))}.get(it,'commentary')
-            events.append(self._status(sid,s,activity,user_message))
+            events.append(self._status(sid,s,activity,user_message,kind=='event_msg' and typ in ('task_started','turn_started')))
         return events
 
 

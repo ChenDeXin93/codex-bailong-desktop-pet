@@ -23,11 +23,13 @@ def run(root):
         from types import SimpleNamespace
         report.update(version=VERSION,frozen=bool(getattr(sys,'frozen',False)))
         app=QApplication([]);pet=Pet();pet.tick.stop()
-        items=[pet.manifest['idle']]+pet.manifest.get('additionalIdleAnimations',[])+pet.variants+[pet.manifest[k] for k in ('dragAnimation','landingAnimation','quotaAnimation')]
+        from desktop_services import all_items
+        items=all_items(pet.manifest)
         for item in items:
             frames=pet.load(item);assert len(frames)==round(item['durationMs']*24/1000)
             assert frames[0].width()==pet.frame_size
-        assert len(pet.variants)==10;report['checks'].append('15段动画可解码，最新14困倦、完整落地主体与音效文件齐全')
+        assert len(pet.variants)==(15 if pet.manifest.get('upstreamAnimationVersion')=='0.4.1' else 10)
+        report['checks'].append(f'{len(items)}段动画可解码，最新14困倦、完整落地主体与音效文件齐全')
         assert (root/'app/sounds/click.wav').is_file()
         assert '最新版' in next(v for v in pet.variants if v['id']=='14')['file']
         for item in items:

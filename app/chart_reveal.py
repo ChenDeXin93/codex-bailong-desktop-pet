@@ -33,7 +33,8 @@ class RasterChart:
                 p.save();p.setClipRect(chart.adjusted(-1,-1,1,1));p.translate(0,chart.bottom()*(1-progress));p.scale(1,progress)
                 p.drawPixmap(0,0,self._layers[1]);p.restore()
         elif self.points:
-            head=trace_head(self.points,progress)
+            curve=getattr(self,'curve',None)
+            head=curve.head(progress) if curve is not None else trace_head(self.points,progress)
             p.save();p.setClipRect(QRectF(chart.left()-2,chart.top()-3,max(0,head.x()-chart.left()+2),chart.height()+6))
             p.drawPixmap(0,0,self._layers[1]);p.restore()
             if progress>0:

@@ -7,6 +7,7 @@ from PySide6.QtWidgets import QWidget,QVBoxLayout,QHBoxLayout,QToolButton,QToolT
 from compact_bubble import font,INK,MUTED,FONT_CSS
 from token_calendar import usage_series,compact_tokens,TOKEN_RANGES
 from chart_reveal import ChartReveal,RasterChart
+from chart_curve import SmoothTrace
 
 class TokenPlot(QWidget,RasterChart):
     def __init__(self,snapshot,period,parent=None,now=None):
@@ -37,7 +38,7 @@ class TokenPlot(QWidget,RasterChart):
         plot=self.chart_rect();bottom=plot.bottom();bins=s['bins'];top=max((b['value'] for b in bins if not b['future']),default=0)
         p.setPen(QPen(QColor('#d8cde3'),.8));p.drawLine(QPointF(plot.left(),bottom),QPointF(plot.right(),bottom))
         p.setPen(QPen(QColor('#e9e1f0'),.6));p.drawLine(QPointF(plot.left(),plot.top()),QPointF(plot.right(),plot.top()))
-        self.hits=[];self.points=[];static=p;p=dynamic
+        self.hits=[];self.points=[];self.curve=None;static=p;p=dynamic
         if s['mode']=='bars':
             slot=plot.width()/max(1,len(bins));gap=1 if len(bins)>15 else 2
             for i,b in enumerate(bins):
@@ -60,10 +61,9 @@ class TokenPlot(QWidget,RasterChart):
                 self.hits.append((QRectF(plot.left()+i*slot,plot.top(),slot,plot.height()+1),b))
                 if b['future'] or not s['available']:continue
                 point=QPointF(plot.left()+(i+.5)*slot,bottom-plot.height()*b['value']/max(1,top));self.points.append(point)
-                if last is None:path.moveTo(point)
-                else:path.lineTo(point)
                 last=point
             if self.points:
+                self.curve=SmoothTrace(self.points);path=self.curve.path
                 fill=QPainterPath(path);fill.lineTo(last.x(),bottom);fill.lineTo(self.points[0].x(),bottom);fill.closeSubpath()
                 p.fillPath(fill,QColor('#e3d7ef'));p.setPen(QPen(QColor('#8d76ab'),1.8,Qt.PenStyle.SolidLine,Qt.PenCapStyle.RoundCap,Qt.PenJoinStyle.RoundJoin));p.drawPath(path)
             left,right='00时','24时'
