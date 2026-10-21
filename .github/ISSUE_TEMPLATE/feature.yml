@@ -1,0 +1,9 @@
+name: 改进建议
+description: 说说你想改善的使用场景
+body:
+  - type: textarea
+    id: need
+    attributes:
+      label: 当前哪里不好用，希望如何改善？
+    validations:
+      required: true

@@ -1,0 +1,20 @@
+name: 问题反馈
+description: 报告可以复现的问题，请去除私密信息
+body:
+  - type: input
+    id: version
+    attributes:
+      label: 软件版本与 Windows 版本
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 操作步骤、预期结果与实际结果
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: 屏幕缩放、浏览器或播放器、连接诊断等补充信息
+      description: 不要上传 auth.json、API 密钥、完整聊天或未脱敏日志。
