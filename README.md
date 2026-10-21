@@ -34,7 +34,7 @@
 
 ## 安装与首次连接
 
-1. 从 [Releases](https://github.com/Wunsch2048/codex-bailong-desktop-pet/releases/latest) 下载一键部署包，完整解压后运行其中的 `.exe`；也可直接下载同版一键部署程序。
+1. 从 [Releases](https://github.com/Wunsch2048/codex-bailong-desktop-pet/releases/latest) 下载 `bailong-desktop-pet-0.6.50-windows-x64.zip`，完整解压后运行其中的一键部署 `.exe`。
 2. 安装器为当前 Windows 用户安装、校验并启动，无需 Python 或管理员权限。
 3. 在本机安装并登录 Codex，发送一次消息。桌宠会自动发现本机数据，通常不需要重启 Codex。
 4. 若没有数据，在“设置 → 连接 → 检测连接与额度”检查各项能力；支持手动指定连接路径。
@@ -57,7 +57,7 @@
 ## 开发、报告与反馈
 
 - [从源码运行与构建](docs/DEVELOPMENT.md)：Python 3.12、PySide6、角色素材准备、验证和打包。
-- [通俗开发报告](docs/report/index.html)：下载仓库后用浏览器打开，可离线查看配图和 GIF；GitHub 页面展示 HTML 源码。
+- [下载通俗开发报告（含 GIF）](https://github.com/Wunsch2048/codex-bailong-desktop-pet/releases/download/v0.6.50/bailong-development-report-0.6.50.zip)：解压后用浏览器打开 `development-report/index.html`；[仓库内报告](docs/report/index.html) 也可离线查看，GitHub 页面展示 HTML 源码。
 - [新增功能说明](docs/新增功能说明.txt) 和 [完整迭代历史](docs/迭代历史.txt)：当前能力与已被替换方案分别记录。
 - 遇到问题请 [提交 Issue](https://github.com/Wunsch2048/codex-bailong-desktop-pet/issues/new/choose)，附版本、系统缩放、操作步骤；请先去掉截图和日志里的私密信息。
 
