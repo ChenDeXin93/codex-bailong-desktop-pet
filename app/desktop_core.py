@@ -6,12 +6,12 @@ import os
 import time
 from pathlib import Path
 
-VERSION='0.7.1'
+VERSION='0.7.2'
 DEFAULTS=dict(schema=2,scale=1.0,playback_speed=1.0,action_gap=2.0,
     random_interval=25.0,move_speed=55.0,move_range=0.75,drag_physics=True,
     on_top=True,video_fullscreen_yield=True,no_move=False,mouse_through=False,wandering=True,random_actions=True,
     commentary=True,sound=True,bubble=True,quota_visible=True,self_talk=False,
-    status_actions=True,status_action_interval=12.,status_response_revision=2,token_chart_range='all',bubble_mode='auto',
+    status_actions=True,status_action_interval=12.,status_response_revision=2,update_checks=True,token_chart_range='all',bubble_mode='auto',
     talk_min=30.0,talk_max=90.0,talk_quiet=True,
     talk_lines=['忙完记得休息一下。','我在这里陪着你。','今天也一起把小事做好吧。'],
     facing=1,character='builtin',character_preferences={},chat_follow=False)

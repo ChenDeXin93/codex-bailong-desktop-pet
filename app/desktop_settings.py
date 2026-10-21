@@ -76,7 +76,7 @@ class SettingsDialog(QDialog):
         self.check(advanced_form,'drag_physics','拖拽松手后启用惯性与反弹')
         for key,title,lo,hi,step in [('playback_speed','播放速度（倍）',.25,3,.25),('action_gap','动作结束后等待（秒）',0,60,1),('random_interval','自主动作间隔（秒）',3,600,1),('move_speed','自主走动速度（像素/秒）',10,300,5)]:self.number(advanced_form,key,title,lo,hi,step)
         self.number(advanced_form,'move_range','自主活动范围',.1,1,.1,factor=100,suffix='% 屏幕')
-        note=QLabel('状态动作只在当前动画播完后检查最新状态；动作结束至少休息8秒，同一任务的同类动作一分钟内不重复。完成消息立即提醒，庆祝动作等待播完。Codex工作时优先状态动作。');note.setWordWrap(True);note.setStyleSheet('font-size:10px;color:#706879;');behavior.addRow(note)
+        note=QLabel('状态动作在当前动画播完后检查；工作动作默认每12秒检查续播，播完至少休息2秒。普通装饰动作一分钟内不重复。完成消息立即提醒，庆祝等待安全边界。');note.setWordWrap(True);note.setStyleSheet('font-size:10px;color:#706879;');behavior.addRow(note)
         self.check(advanced_form,'talk_quiet','Codex 工作时不自言自语')
         self.number(advanced_form,'talk_min','台词最短间隔（秒）',5,3600,5);self.number(advanced_form,'talk_max','台词最长间隔（秒）',5,7200,5)
         self.lines=QPlainTextEdit();self.lines.setMaximumHeight(100);self.lines.setPlaceholderText('每行一句，自动台词不会播放声音');advanced_form.addRow('自定义台词',self.lines)
@@ -123,6 +123,11 @@ class SettingsDialog(QDialog):
         button=QPushButton('检查所有素材');button.clicked.connect(self.validate);library.addRow(button)
         self.library_status=QLabel();self.library_status.setWordWrap(True);library.addRow(self.library_status)
         maintenance=self.tab('维护与数据')
+        self.section(maintenance,'软件更新','检查 GitHub 公开稳定版；下载和安装由你主动发起。')
+        self.check(maintenance,'update_checks','自动检查更新（不自动下载）')
+        if hasattr(pet,'updates'):
+            from update_widgets import UpdatePanel
+            self.update_panel=UpdatePanel(pet.updates);maintenance.addRow(self.update_panel)
         self.section(maintenance,'诊断与数据','维护操作立即执行；不属于设置草稿。')
         for title,slot in [('打开配置与聊天记录目录',pet.open_data),('导出诊断报告（不含对话和密钥）',pet.export_diagnostics),('备份设置（不含密钥与对话）',pet.backup_settings),('恢复设置备份',pet.restore_settings)]:
             button=QPushButton(title);button.clicked.connect(slot);maintenance.addRow(button)

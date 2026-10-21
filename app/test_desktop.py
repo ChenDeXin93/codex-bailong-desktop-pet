@@ -246,7 +246,9 @@ class DesktopUiTests(unittest.TestCase):
         with patch('desktop_settings.autostart_enabled',return_value=False),patch('desktop.open_codex') as open_codex:
             button('bubble_settings').click();settle();self.assertTrue(self.pet.settings_dialog.isVisible())
             button('bubble_chat').click();settle();self.assertTrue(self.pet.chat_window.isVisible())
-            button('open_codex').click();open_codex.assert_called_once()
+            button('open_codex').click();deadline=time.monotonic()+2
+            while not open_codex.called and time.monotonic()<deadline:app.processEvents();time.sleep(.003)
+            open_codex.assert_called_once()
         button('bubble_pin').click();self.assertFalse(self.pet.settings['on_top']);self.assertFalse(self.pet.bubble.pinned)
         self.pet.apply_settings({'no_move':True});settle();self.assertFalse(button('bubble_move').isEnabled())
 

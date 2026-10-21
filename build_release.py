@@ -29,6 +29,7 @@ def build(legacy_formats=False):
         packed=CACHE/(item['id']+'.webp');assert record['outputSha256']==__import__('asset_pack').digest(packed)
         target.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(packed,target)
     shutil.copy2(ROOT/'状态响应优化/更新说明.txt',release/'持续状态响应说明.txt')
+    shutil.copy2(ROOT/'应用内更新/更新说明.txt',release/'应用内更新说明.txt')
     notes=ROOT/'动作质量修复/原始动作逻辑与质量基准.txt'
     shutil.copy2(ROOT/'新增动作接入/更新说明.txt',release/'新增动作与Codex联动说明.txt')
     shutil.copy2(ROOT/'发布说明/版本编号规则.json',release/'版本编号规则.json')
