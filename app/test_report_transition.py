@@ -43,6 +43,13 @@ class ReportTransitionTests(unittest.TestCase):
         tail=heights[6:]
         self.assertTrue(all(b<=a for a,b in zip(tail,tail[1:])), 'closing tail never grows back')
         self.finish();self.assertFalse(self.r.isVisible());self.assertIsNone(self.r._frame)
+    def test_closing_report_keeps_content_until_card_is_small(self):
+        self.r.open();self.finish();self.r.dismiss()
+        self.r.animation.setCurrentTime(self.r.animation.duration()//2)
+        image=self.r.grab().toImage();rect=self.r.visual_rect().toAlignedRect()
+        dark=sum(image.pixelColor(x,y).red()<150 for y in range(max(0,rect.top()+4),min(image.height(),rect.bottom()-4),2)
+                 for x in range(max(0,rect.left()+4),min(image.width(),rect.right()-4),2))
+        self.assertGreater(dark,20,'report content vanished before its closing card shrank')
     def test_dismiss_rebound_can_be_reopened_without_a_flash_or_jump(self):
         r=self.r;r.open();self.finish();r.dismiss();r.animation.setCurrentTime(round(r.animation.duration()*.75))
         fraction=r.fraction;frame=r._frame.cacheKey();rect=QRect(r.geometry())

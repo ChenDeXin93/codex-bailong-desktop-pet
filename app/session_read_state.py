@@ -96,18 +96,21 @@ def seen_completed_turns(home,pending):
                 published.update(db.execute('SELECT thread_id,last_published_turn FROM thread_read_receipts WHERE thread_id IN ('+slots+')',[s for s,t in chunk]))
     except (OSError,sqlite3.Error,ValueError):pass
     accepted={(s,t) for s,t in keys if published.get(s)==t}
-    # Paginated desktop history can omit or leave stale thread_read_receipts. Its
-    # latest completed turn supplies equivalent exact-turn publication proof.
+    # Paginated desktop history can omit or leave stale thread_read_receipts.
+    # Verify the exact pending turn, not just the latest turn: a new task can
+    # already be running, or a formerly announced completion can settle as
+    # failed/interrupted. Stable thread-level read evidence acknowledges those
+    # old terminal notices too. Missing/unfinished/unknown turns stay pending.
     fallback=[(s,t) for s,t in keys if (s,t) not in accepted]
     if fallback:
         try:
             with closing(sqlite3.connect((home/'thread_history_1.sqlite').as_uri()+'?mode=ro',uri=True,timeout=.1)) as db:
-                latest={}
+                terminal=set()
                 for start in range(0,len(fallback),128):
-                    chunk=fallback[start:start+128];slots=','.join('?' for _ in chunk)
-                    rows=db.execute("SELECT thread_id,turn_id,status FROM thread_turns a WHERE thread_id IN ("+slots+") AND rollout_ordinal=(SELECT MAX(rollout_ordinal) FROM thread_turns b WHERE b.thread_id=a.thread_id)",[s for s,t in chunk])
-                    latest.update({sid:(turn,status) for sid,turn,status in rows})
-            accepted.update((s,t) for s,t in fallback if latest.get(s)==(t,'completed'))
+                    chunk=fallback[start:start+128];slots=','.join('(?,?)' for _ in chunk)
+                    rows=db.execute("WITH pending(thread_id,turn_id) AS (VALUES "+slots+") SELECT a.thread_id,a.turn_id FROM thread_turns a JOIN pending p ON a.thread_id=p.thread_id AND a.turn_id=p.turn_id WHERE a.status IN ('completed','failed','interrupted')",[value for key in chunk for value in key])
+                    terminal.update(rows)
+            accepted.update(terminal)
         except (OSError,sqlite3.Error,ValueError):pass
     return [key for key in keys if key in accepted]
 

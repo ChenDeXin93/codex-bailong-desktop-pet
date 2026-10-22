@@ -48,6 +48,7 @@ class DeckTabs(QWidget):
 
 class CardDeck(QWidget):
     selected=Signal(str)
+    reset_details_requested=Signal()
     refresh_requested=Signal(str)
     token_range_changed=Signal(str)
     def __init__(self,page,snapshot,reset_snapshot,error,busy,parent=None,token_busy=False,token_range="all"):
@@ -59,7 +60,7 @@ class CardDeck(QWidget):
             button=QToolButton();button.setObjectName('card_'+key);button.setText(text);button.setCheckable(True);button.setChecked(page==key);button.setFocusPolicy(Qt.FocusPolicy.NoFocus);button.setCursor(Qt.CursorShape.PointingHandCursor)
             button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly);button.setFont(font(11,True));button.setFixedSize(45 if key=='tokens' else 35,20)
             button.setToolTip('Token用量柱状图与今日小时曲线' if key=='tokens' else ('有重置公告待落实，点击查看' if pending_reset(reset_snapshot) else '查看额外重置公告'))
-            accent='#915e74' if key=='reset' and pending_reset(reset_snapshot) else '#75618d'
+            accent='#75618d'
             button.setStyleSheet('QToolButton{'+FONT_CSS+'font-size:11px;color:'+accent+';border:0;border-radius:5px;padding:1px;background:transparent;}QToolButton:hover:!checked{background:#f1ecf6;}')
             button.clicked.connect(lambda checked=False,k=key:self.selected.emit(k));row.addWidget(button,1);tabs.buttons[key]=button
         layout.addWidget(tabs)
@@ -69,6 +70,7 @@ class CardDeck(QWidget):
         if page not in self.pages:
             content=Announcement(self.reset_snapshot,self.error,self.reset_busy,with_refresh=False,dense=True) if page=='reset' else TokenChartCard(self.snapshot,period=self.token_range)
             if page=='tokens':content.rangeChanged.connect(self.token_range_changed.emit)
+            else:content.expand.connect(self.reset_details_requested.emit)
             content.setFixedHeight(78);self.pages[page]=content;self.stack.addWidget(content)
         self.content=self.pages[page];self.stack.setCurrentWidget(self.content);self.tabs.select(page,animate)
         if page=='tokens' and animate:self.content.plot.begin_reveal();self.content.plot.start_reveal()

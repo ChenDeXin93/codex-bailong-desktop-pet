@@ -2,7 +2,7 @@
 from PySide6.QtCore import Qt,QRectF,QPointF
 from PySide6.QtGui import QPainter,QColor,QPen
 from PySide6.QtWidgets import QWidget,QLabel,QVBoxLayout,QHBoxLayout,QTabWidget,QScrollArea,QFrame
-from compact_bubble import font,FONT_CSS,source_button
+from compact_bubble import font,FONT_CSS,source_button,Announcement
 from reset_watch import pending_reset,schedule_text,account_reset_text
 from ring_widgets import draw_metric_icon
 from quota_summary_data import quota_items,today_tokens
@@ -74,8 +74,10 @@ class DetailsTabs(QTabWidget):
         card.text('全部 / 近30天 / 近7天：用量柱状图。\n今日00–24时：每小时消耗曲线，非累计值。\n悬停图表可查看精确日期与用量。',size=11,muted=True)
         card.text('按本地日期统计，仅包含本机已记录历史。输入含缓存，输出含推理，不重复相加；长时段自动合并日期。',size=11,muted=True)
         pending=pending_reset(bubble.reset_snapshot)
-        card=self.card(reset,'待落实的额外重置' if pending else '额外重置安排',warning=bool(pending))
-        card.text(schedule_text(bubble.reset_snapshot),strong=True)
+        countdown=Announcement(bubble.reset_snapshot,bubble.reset_feed_error,with_refresh=False)
+        card=self.card(reset,countdown.view['title'])
+        card.body.addWidget(countdown)
+        if countdown.view['phase']=='pending':card.text(schedule_text(bubble.reset_snapshot),size=10,muted=True)
         if pending and pending.get('text'):card.text(pending['text'])
         if bubble.reset_feed_error:card.text('重置消息连接失败 · 显示上次记录' if bubble.reset_snapshot else '重置消息暂不可用，稍后自动重试',size=11,warning=True)
         card=self.card(reset,'公告来源')

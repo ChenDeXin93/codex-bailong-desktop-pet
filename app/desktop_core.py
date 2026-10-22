@@ -12,7 +12,7 @@ DEFAULTS=dict(schema=2,scale=1.0,playback_speed=1.0,action_gap=2.0,
     on_top=True,video_fullscreen_yield=True,no_move=False,mouse_through=False,wandering=True,random_actions=True,
     commentary=True,sound=True,bubble=True,quota_visible=True,self_talk=False,character_visible=True,card_anchor=None,
     status_actions=True,status_action_interval=12.,status_response_revision=2,update_checks=True,token_chart_range='all',bubble_mode='auto',
-    talk_min=30.0,talk_max=90.0,talk_quiet=True,
+    capsule_action='chatgpt',capsule_website='',talk_min=30.0,talk_max=90.0,talk_quiet=True,
     talk_lines=['忙完记得休息一下。','我在这里陪着你。','今天也一起把小事做好吧。'],
     facing=1,character='builtin',character_preferences={},chat_follow=False)
 
@@ -40,6 +40,13 @@ def normalized(raw):
     out['facing']=-1 if out['facing']==-1 else 1
     if out['token_chart_range'] not in ('all','30d','7d','day'):out['token_chart_range']='all'
     if out['bubble_mode'] not in ('auto','mini','minimal'):out['bubble_mode']='auto'
+    from quick_actions import action_info
+    out['capsule_action']=action_info(out['capsule_action'])[0]
+    out['capsule_website']=str(out['capsule_website'] or '')[:2048]
+    if out['capsule_action']=='website':
+        from quick_actions import website_url
+        try:out['capsule_website']=website_url(out['capsule_website'])
+        except ValueError:out['capsule_action']='chatgpt'
     if not isinstance(out['character_preferences'],dict):out['character_preferences']={}
     out['schema']=2
     return out

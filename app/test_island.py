@@ -101,7 +101,7 @@ class ModeTests(unittest.TestCase):
         self.b.set_mode('mini');self.finish();size=self.b.size();self.b.message('很长的具体任务详情'*50)
         self.assertEqual(self.b.size(),size);self.assertTrue(self.b.status_view.isHidden());self.assertFalse(self.b.status_view.animation.state().value)
         self.assertEqual((size.width(),size.height()),(222,44))
-        calls=[];self.b.chatRequested.connect(lambda:calls.append('chat'));self.b.findChild(QToolButton,'island_chat').click();self.assertEqual(calls,['chat'])
+        calls=[];self.b.shortcutRequested.connect(lambda:calls.append('shortcut'));self.b.findChild(QToolButton,'island_shortcut').click();self.assertEqual(calls,['shortcut'])
     def test_editing_and_report_do_not_auto_collapse(self):
         self.b.show_page('chat',QWidget());self.finish();self.b.codex_open=False;self.b.evaluate_mode(self.b.last_task_update+500)
         self.assertEqual(self.b.panel_page,'chat');self.assertFalse(self.b.is_island())

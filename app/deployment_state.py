@@ -14,7 +14,7 @@ def entry_paths(root,system):
             if ctypes.windll.shell32.SHGetFolderPathW(None,csidl,None,0,buffer):raise OSError('无法确定快捷方式目录')
             return Path(buffer.value)
         desktop=folder(16);start=folder(11);startup=folder(7)
-        paths.extend([desktop/'白龙桌宠增强版.lnk',desktop/'白龙桌宠.lnk',start/'Programs/白龙桌宠增强版.lnk',startup/'BailongEnhanced.vbs',startup/'白龙桌宠增强版.lnk'])
+        paths.extend([desktop/'白龙桌宠增强版.lnk',desktop/'白龙桌宠.lnk',start/'Programs/白龙桌宠增强版.lnk',startup/'BailongEnhanced.vbs',startup/'白龙桌宠增强版.lnk',startup/'BailongCodexSync.vbs'])
     return paths
 
 REGISTRY=r'Software\Microsoft\Windows\CurrentVersion\Uninstall\BailongEnhanced'
@@ -41,7 +41,8 @@ def capture_entries(root,system):
 
 def restore_entries(root,snapshot,system):
     expected={str(p) for p in entry_paths(root,system)}
-    if set(snapshot['files'])!=expected:raise ValueError('恢复入口范围无效')
+    legacy={p for p in expected if not p.endswith('BailongCodexSync.vbs')}
+    if set(snapshot['files']) not in (expected,legacy):raise ValueError('恢复入口范围无效')
     for name,value in snapshot['files'].items():
         path=Path(name)
         if path.is_symlink():raise ValueError('恢复入口不能是符号链接')

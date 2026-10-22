@@ -46,7 +46,9 @@ class UpdatePanel(QWidget):
         self.package.setVisible(newer)
         self.package.setText('纯程序更新 · 复用本地动画，保留高清偏好' if state.get('package_kind')=='program' else ('完整安装包 · '+state['package_reason'] if state.get('package_reason') else '完整安装包 · 包含轻量素材'))
         notes=re.sub(r'^\s*#{1,6}\s*','',state.get('notes',''),flags=re.M)
-        if notes!=self.details.toPlainText():self.details.setPlainText(notes)
+        if notes!=self.details.toPlainText():
+            self.details.setPlainText(notes)
+            if self.disclosure.expanded or self.disclosure._animating:self.disclosure.refresh_content()
         if not notes:self.details_button.setChecked(False)
         self.details_button.setVisible(bool(notes));self.github.setVisible(bool(state.get('url')))
     def open_release(self):

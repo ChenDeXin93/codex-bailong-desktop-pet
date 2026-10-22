@@ -11,7 +11,7 @@ from token_analytics import model_series,token_analogy
 from book_reference import analogy as book_analogy,catalog as book_catalog
 from chart_reveal import ChartReveal,RasterChart
 from chart_curve import SmoothTrace
-from spring_motion import island_response,dismiss_progress,EXPAND_MS,DISMISS_MS
+from spring_motion import island_response,dismiss_progress,stage,EXPAND_MS,DISMISS_MS
 from card_motion import card_geometry,paint_card
 
 from ui_theme import MODEL_COLORS,PANEL,PRIMARY,SELECTED
@@ -539,4 +539,5 @@ class DailyReport(QWidget):
         p.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
         if self.follow.active:return  # Only the independent fixed canvas presents linked motion.
         if not self.requested and not self._animating and self.surface.isHidden():return
-        paint_card(p,self.visual_rect(),self._frame,self.fraction if self._frame is not None else 1.)
+        content=stage(self.fraction,.02,.28) if self._animating and not self.requested else None
+        paint_card(p,self.visual_rect(),self._frame,self.fraction if self._frame is not None else 1.,content_progress=content)

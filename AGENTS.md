@@ -1,6 +1,6 @@
 # 项目协作
 
-这是 Windows 独立白龙桌宠增强版。当前基线 v0.7.9 / UI69。先阅读 README.md、NOTICE.md、docs/DEVELOPMENT.md 与 docs/迭代历史.txt。
+这是 Windows 独立白龙桌宠增强版。当前基线 v0.8.3 / UI73。先阅读 README.md、NOTICE.md、docs/DEVELOPMENT.md 与 docs/迭代历史.txt。
 
 - 保持原角色比例、清晰度和动画播放边界；自动动作不发声。
 - 未读完成提醒优先于视频全屏让位；手动关闭置顶不得自动重开。

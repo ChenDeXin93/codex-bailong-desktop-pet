@@ -17,13 +17,14 @@ def card_geometry(bounds,progress,anchor='bottom',seed_height=32.):
     return QRectF(bounds.center().x()-width/2,top,width,max(0.,height))
 
 
-def paint_card(p,rect,frame,progress,background=SURFACE,inset=0.):
+def paint_card(p,rect,frame,progress,background=SURFACE,inset=0.,content_progress=None):
     if progress<=0. or rect.height()<=0:return
     radius=min(rect.width()/2,rect.height()/2,20.+(PANEL_RADIUS-20.)*min(1.,progress))
     path=QPainterPath();path.addRoundedRect(rect,radius,radius)
     p.save();p.setOpacity(stage(progress,0.,.09));p.fillPath(path,QColor(background));p.setClipPath(path)
     if frame is not None and not frame.isNull():
-        entry=stage(progress,.7,1.);size=frame.deviceIndependentSize();scale=.975+.025*entry
+        entry=stage(progress,.7,1.) if content_progress is None else content_progress
+        size=frame.deviceIndependentSize();scale=.975+.025*entry
         w=min(size.width(),rect.width()-2*inset)*scale;h=size.height()*scale
         target=QRectF(rect.center().x()-w/2,rect.center().y()-h/2,max(0.,w),h)
         p.setOpacity(stage(progress,0.,.09)*entry);p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
@@ -42,6 +43,9 @@ class AnimatedDisclosure(QWidget):
     def __init__(self,body,parent=None,background=SURFACE):
         super().__init__(parent);self.body=body;body.setParent(self);self.background=background
         self.expanded=False;self.progress=0.;self.full_height=1;self._frame=None;self._animating=False;self._measuring=False
+        # setFixedHeight changes maximumHeight. Remember the body's own limit
+        # before measuring it, especially for capped text editors.
+        self._body_height_limit=body.maximumHeight()
         self.setSizePolicy(QSizePolicy.Policy.Expanding,QSizePolicy.Policy.Fixed)
         self.setFixedHeight(0);body.hide();self.hide()
         self.animation=QVariantAnimation(self);self.animation.setEasingCurve(QEasingCurve.Type.Linear)
@@ -55,7 +59,8 @@ class AnimatedDisclosure(QWidget):
             width=max(1,self.width()-28);self.body.setFixedWidth(width);self.body.ensurePolished()
             if self.body.layout():self.body.layout().activate()
             height=self.body.heightForWidth(width) if self.body.hasHeightForWidth() else self.body.sizeHint().height()
-            self.body.setFixedHeight(max(1,height));self.body.move(14,8);self.full_height=self.body.height()+16
+            self.body.setFixedHeight(max(1,min(height,self._body_height_limit)))
+            self.body.move(14,8);self.full_height=self.body.height()+16
         finally:self._measuring=False
     def set_expanded(self,value):
         value=bool(value)
@@ -103,7 +108,11 @@ class AnimatedDisclosure(QWidget):
         super().resizeEvent(event)
     def paintEvent(self,event):
         p=QPainter(self);p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        paint_card(p,self.visual_rect(),self._frame if self._animating else None,self.progress,self.background,8.)
+        # Keep the outgoing text visible while its card is still large. The
+        # expanding curve delays its entrance, but using that same curve in
+        # reverse left a conspicuous empty card through most of the collapse.
+        content=stage(self.progress,.02,.28) if self._animating and not self.expanded else None
+        paint_card(p,self.visual_rect(),self._frame if self._animating else None,self.progress,self.background,8.,content)
     def visual_rect(self):
         # Reserve six pixels on each side for the spring's widest pose. The
         # border must never be clipped by the child widget during its rebound.

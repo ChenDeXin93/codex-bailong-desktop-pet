@@ -81,7 +81,7 @@ class SurfaceState:
         if minimal:image=snapshot(root)
         satellites=[]
         if island:
-            for name in ('island_chat','island_quota'):
+            for name in ('island_shortcut','island_quota'):
                 widget=next((w for w in bubble.findChildren(QToolButton,name) if w.isVisibleTo(bubble.content)),None)
                 if widget:
                     pos=widget.mapTo(bubble.content,QPoint());satellites.append((QRectF(QPointF(origin+pos),QSizeF(widget.size())),snapshot(widget)))

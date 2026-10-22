@@ -42,6 +42,8 @@ def register(exe,maintenance,startup):
     vbs=startup_dir/'BailongEnhanced.vbs'
     if startup:vbs.write_text('Set s=CreateObject("WScript.Shell")\ns.Run """'+str(exe)+'""",0,False\n',encoding='utf-16')
     elif vbs.exists():vbs.unlink()
+    from codex_startup import register as register_codex_startup
+    register_codex_startup(exe)
     with winreg.CreateKey(winreg.HKEY_CURRENT_USER,r'Software\Microsoft\Windows\CurrentVersion\Uninstall\BailongEnhanced') as key:
         for name,value in dict(DisplayName='白龙桌宠增强版',DisplayVersion=exe.parent.name.split('-')[0],Publisher='本地白龙桌宠项目',InstallLocation=str(ROOT),UninstallString='"'+str(maintenance)+'" --manage').items():winreg.SetValueEx(key,name,0,winreg.REG_SZ,value)
         winreg.SetValueEx(key,'NoModify',0,winreg.REG_DWORD,1)
@@ -112,6 +114,8 @@ def startup_preference(root=ROOT):
 def stop_existing(root=ROOT):
     """Close only running binaries inside this user's registered versions."""
     import psutil
+    from codex_startup import stop_watchers
+    stop_watchers(root)
     root=Path(root).resolve();manifest=read_manifest(root);known=set()
     for name in manifest.get('versions',[]):
         try:known.add((checked_version(root,name)/'BailongEnhanced.exe').resolve())
@@ -213,6 +217,8 @@ class Installer(QWidget):
     def uninstall(self):
         if QMessageBox.question(self,'卸载白龙','卸载所有已安装的白龙版本？配置、角色包和聊天记录会保留。')!=QMessageBox.StandardButton.Yes:return
         try:
+            from codex_startup import configure,stop_watchers
+            configure(False);stop_watchers(ROOT)
             m=read_manifest()
             # Close the app through its local control socket, never unrelated Python/Codex processes.
             active=checked_version(ROOT,m['current']) if m['current'] else None

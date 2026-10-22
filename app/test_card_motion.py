@@ -75,6 +75,21 @@ class IntegratedCardTests(unittest.TestCase):
                 self.assertEqual(card.width(),initial);heights.append(card.full_height)
             self.assertEqual(len(set(heights)),1)
             card.animation.resume();card.complete()
+    def test_update_notes_remain_visible_while_closing_and_respect_height_cap(self):
+        s=self.fixture.settings();s.tabs.setCurrentIndex(s.tabs.count()-1)
+        panel=s.update_panel;panel.controller.publish(notes='窗口过渡和内容交接。\n'*9)
+        APP.processEvents();card=panel.disclosure;native=QRect(self.fixture.pet.bubble.geometry())
+        panel.details_button.click();card.complete();APP.processEvents()
+        self.assertEqual(card.body.height(),160)
+        panel.details_button.click();card.animation.pause()
+        card.animation.setCurrentTime(card.animation.duration()//2);APP.processEvents()
+        image=card.grab().toImage()
+        dark=sum(image.pixelColor(x,y).red()<150 for y in range(4,image.height()-4,2)
+                 for x in range(20,image.width()-20,2))
+        self.assertGreater(dark,20,'update text vanished while the disclosure was still large')
+        self.assertEqual(self.fixture.pet.bubble.geometry(),native)
+        card.animation.resume();card.complete();APP.processEvents()
+        self.assertEqual(card.height(),0);self.assertFalse(card.isVisible());self.assertIsNone(card._frame)
 
 
 if __name__=='__main__':unittest.main()

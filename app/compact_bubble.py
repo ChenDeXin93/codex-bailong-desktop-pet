@@ -51,6 +51,11 @@ def action_icon(kind):
             a=math.radians(angle);p.drawLine(QPointF(8+4*math.cos(a),8+4*math.sin(a)),QPointF(8+6*math.cos(a),8+6*math.sin(a)))
     elif kind=='chat':
         p.drawRoundedRect(QRectF(2,3,12,9),2,2);p.drawLine(5,12,4,14);p.drawLine(4,14,8,12)
+    elif kind=='web':
+        p.drawEllipse(QRectF(2,2,12,12));p.drawEllipse(QRectF(5,2,6,12));p.drawLine(2,8,14,8)
+    elif kind=='code':
+        p.drawPolyline(QPolygonF([QPointF(5,4),QPointF(1,8),QPointF(5,12)]))
+        p.drawPolyline(QPolygonF([QPointF(11,4),QPointF(15,8),QPointF(11,12)]));p.drawLine(9,3,7,13)
     elif kind=='pin':
         p.drawLine(5,3,11,3);p.drawLine(6,3,6,7);p.drawLine(10,3,10,7)
         p.drawLine(6,7,4,10);p.drawLine(4,10,12,10);p.drawLine(12,10,10,7);p.drawLine(8,10,8,14)
@@ -342,33 +347,7 @@ class QuotaDial(QWidget):
         p.drawEllipse(QRectF(left,70,10,10));p.drawLine(QPointF(left+5,72.5),QPointF(left+5,75));p.drawLine(QPointF(left+5,75),QPointF(left+7.5,76.5))
         p.drawText(QRectF(left+15,65,text_width+1,20),Qt.AlignmentFlag.AlignVCenter,text)
 
-class Announcement(QWidget):
-    """Uses the otherwise vacant second quota column for public reset information."""
-    refresh_requested=Signal()
-    def __init__(self,snapshot,error,busy=False,parent=None,with_refresh=True,dense=False):
-        super().__init__(parent);self.snapshot=snapshot;self.error=error;self.setFixedHeight(CARD_HEIGHT)
-        self.setToolTip(schedule_text(snapshot)+'\n'+str((pending_reset(snapshot) or {}).get('text') or '')+'\n北京时间 · 来源：Codex Resets（第三方）\n'+('更新失败，保留上次记录。' if error else '预计安排不等于账户额度已经到账。'))
-        layout=QVBoxLayout(self);layout.setContentsMargins(3 if dense else 7,0 if dense else 2,2,0 if dense else 1);layout.setSpacing(0 if dense else 1)
-        item=pending_reset(snapshot);stamp=epoch((item or {}).get('scheduled'))
-        title='备用重置' if (item or {}).get('reset_type')=='banked' else '额外重置'
-        title_row=QHBoxLayout();title_row.setContentsMargins(0,0,0,0);title_row.setSpacing(2)
-        label=QLabel(title+(' · !' if error else ''));label.setStyleSheet(FONT_CSS+'font-size:11px;color:#706879;');title_row.addWidget(label,1)
-        self.refresh_button=None
-        if with_refresh:
-            self.refresh_button=action_button('refresh','刷新重置公告',parent=self);self.refresh_button.setObjectName('reset_refresh')
-            self.refresh_button.setEnabled(not busy);self.refresh_button.clicked.connect(lambda:self.refresh_requested.emit())
-            title_row.addWidget(self.refresh_button)
-        layout.addLayout(title_row)
-        if snapshot is None:main='查询中…';note='正在连接公告'
-        elif not item:main='暂无待落实安排';note='有新消息会提醒'
-        elif stamp is None:main='时间待定';note='已有重置安排'
-        else:main=local_time(stamp);note='已过 · 待确认' if stamp<=time.time() else '预计最晚 · 北京时间'
-        label=QLabel(main);label.setStyleSheet(FONT_CSS+'font-size:12px;color:#514360;');layout.addWidget(label)
-        label=QLabel(note);label.setStyleSheet(FONT_CSS+'font-size:11px;color:#706879;');layout.addWidget(label)
-        if item and item.get('text') and not dense:
-            summary=Summary(item['text'],99);summary.setCursor(Qt.CursorShape.ArrowCursor);layout.addWidget(summary)
-        source=source_button(self);layout.addWidget(source,0,Qt.AlignmentFlag.AlignLeft)
-        self.setAccessibleName(title+'：'+main+'，'+note)
+from reset_card import ResetCard as Announcement
 
 def source_button(parent=None,compact=False):
     from PySide6.QtGui import QDesktopServices
@@ -399,6 +378,7 @@ class CompactBubble(Bubble):
     tokenRangeChanged=Signal(str)
     settingsRequested=Signal()
     chatRequested=Signal()
+    shortcutRequested=Signal()
     codexRequested=Signal()
     conversationRequested=Signal(str)
     optionRequested=Signal(str,bool)
@@ -435,7 +415,7 @@ class CompactBubble(Bubble):
             palette.setColor(role,QColor(color))
         self.editor_stack.setPalette(palette)
         self.status_indicator=StatusIndicator(self.content)
-        self.island=None;self.minimal_quota=None;self._quota_reset_requested=None;self._card_press=None;self._card_dragged=False
+        self.island=None;self.minimal_quota=None;self.shortcut_button=None;self.capsule_action='chatgpt';self._quota_reset_requested=None;self._card_press=None;self._card_dragged=False
         self.status_indicator.changed.connect(self._refresh_island_status)
         self.size_transition=PanelTransition(self)
         self.size_transition.animation.finished.connect(self._apply_pending_mode)
@@ -448,6 +428,7 @@ class CompactBubble(Bubble):
     def clear(self):
         # Headers are rebuilt; the tiny task animation must keep its clock.
         self._plot_resume=None;self.deck=None
+        self.shortcut_button=None
         for widget in self.content.findChildren(QWidget):
             if widget.isVisible() and type(widget).__name__=='TokenPlot' and widget.reveal.animation.state()==QAbstractAnimation.State.Running:
                 self._plot_resume=widget.reveal.animation.currentTime()
@@ -570,14 +551,18 @@ class CompactBubble(Bubble):
         self.select_dashboard('tokens');self.select_token_range('day')
     def show_quota_details(self):
         self.detail_tab='quota';self.show_status(True)
+    def show_reset_details(self):
+        self.detail_tab='reset';self.show_status(True)
     def request_refresh_all(self):
         if self.refresh_busy:return
         self.set_refresh_busy(True);self.refreshAllRequested.emit()
     def set_refresh_busy(self,busy):
         self.refresh_busy=bool(busy);self.refresh_button.set_busy(self.refresh_busy)
+        if self.shortcut_button and self.capsule_action=='refresh':self.shortcut_button.set_busy(self.refresh_busy)
         self.refresh_button.setToolTip('正在刷新额度、Token 与重置公告…' if busy else '刷新额度、Token 与重置公告')
     def finish_refresh(self,success=True):
         self.refresh_busy=False;self.refresh_button.finish(success)
+        if self.shortcut_button and self.capsule_action=='refresh':self.shortcut_button.finish(success)
         self.refresh_button.setToolTip('额度、Token 与重置公告已刷新' if success else '部分数据刷新失败，保留上次记录；点击重试')
     def set_quota_busy(self,busy):
         changed=self.quota_busy!=bool(busy)
@@ -711,6 +696,7 @@ class CompactBubble(Bubble):
             quota.resetDue.connect(self._quota_reset_due);row.addWidget(quota,1)
             self.ring_kinds=['quota']*len(quota.items)+['time','tokens']
             deck=CardDeck(self.dashboard_page,self.token_snapshot,self.reset_snapshot,self.reset_feed_error,self.reset_busy,token_busy=self.token_busy,token_range=self.token_range)
+            deck.reset_details_requested.connect(self.show_reset_details)
             self.deck=deck
             deck.selected.connect(self.select_dashboard)
             deck.token_range_changed.connect(self.select_token_range)
@@ -799,9 +785,12 @@ class CompactBubble(Bubble):
         self.content.setFixedWidth(WIDTH if self.show_quota else WIDTH-45)
         cluster=QWidget();cluster.setFixedHeight(40);row=QHBoxLayout(cluster);row.setContentsMargins(0,0,0,0);row.setSpacing(5)
         circle_style='QToolButton{border:1px solid #e0d9e6;border-radius:20px;background:#fcfafc;}QToolButton:hover{background:#eee8f3;}QToolButton:pressed{background:#e4dbea;}'
-        chat=action_button('chat','和白龙闲聊');chat.setObjectName('island_chat');chat.setFixedSize(40,40);chat.setIconSize(QSize(18,18))
-        chat.setStyleSheet(circle_style)
-        chat.clicked.connect(self.chatRequested.emit);row.addWidget(chat)
+        from quick_actions import action_info
+        key,title,icon=action_info(self.capsule_action)
+        shortcut=action_button(icon,title,keyboard=True);shortcut.setObjectName('island_shortcut');shortcut.setFixedSize(40,40);shortcut.setIconSize(QSize(18,18))
+        shortcut.setStyleSheet(circle_style+'QToolButton:focus{border:2px solid #8b78a6;}')
+        shortcut.clicked.connect(self.shortcutRequested.emit);row.addWidget(shortcut);self.shortcut_button=shortcut
+        if key=='refresh':shortcut.set_busy(self.refresh_busy)
         self.status_indicator.set_island(True);self.island=StatusIsland(self.status_indicator)
         from conversation_roster import LABELS
         selected,extra=self.roster.selection(self.status_indicator.unread)

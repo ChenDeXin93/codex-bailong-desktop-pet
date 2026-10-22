@@ -10,6 +10,11 @@ import queue
 import time
 from pathlib import Path
 
+# Companion watcher has no GUI, Qt initialization or animation resources.
+if __name__=='__main__' and '--watch-codex' in sys.argv:
+    from codex_startup import main as watch_codex
+    raise SystemExit(watch_codex())
+
 from PySide6.QtCore import Qt, QThread, Signal, QTimer, QPoint, QRectF, QUrl
 from PySide6.QtGui import QIcon, QPainter, QPixmap, QCursor, QFontDatabase, QFont, QDesktopServices
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon, QProgressBar, QLabel
@@ -771,7 +776,7 @@ def main():
     socket=QLocalSocket()
     socket.connectToServer(server_name)
     if socket.waitForConnected(300):
-        socket.write(b'quit' if '--quit' in sys.argv else b'settings' if '--settings' in sys.argv else b'show')
+        socket.write(b'quit' if '--quit' in sys.argv else b'settings' if '--settings' in sys.argv else b'ping' if '--from-codex' in sys.argv else b'show')
         socket.flush();socket.waitForBytesWritten(300);return 0
     if '--quit' in sys.argv:return 0
     QLocalServer.removeServer(server_name)
@@ -786,6 +791,7 @@ def main():
             command=bytes(peer.readAll())
             if command==b'quit':pet.close()
             elif command==b'settings':pet.open_settings()
+            elif command==b'ping':pass
             else:pet.recover()
             peer.disconnectFromServer()
             if peer in connections:connections.remove(peer)
@@ -800,6 +806,9 @@ def main():
     pet.position_bubble()
     from deployment_state import write_ready_receipt
     QTimer.singleShot(250,lambda:write_ready_receipt(pet,server))
+    if not any(arg in sys.argv for arg in ('--preview','--smoke-test')):
+        from codex_startup import ensure_watcher
+        QTimer.singleShot(1600,ensure_watcher)
     if '--settings' in sys.argv:pet.open_settings()
     if '--smoke-test' in sys.argv:
         if '--smoke-report' in sys.argv:pet.open_report()

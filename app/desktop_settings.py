@@ -55,6 +55,10 @@ class SettingsDialog(QDialog):
         self.startup=QCheckBox('登录 Windows 时启动');appearance.addRow(self.startup)
         self.field_tabs['startup']=self.tabs.count()-1;self.field_titles['startup']='开机启动'
         self.startup.toggled.connect(lambda:self.edited('startup'))
+        self.codex_startup=QCheckBox('打开 Codex 时自动启动桌宠');appearance.addRow(self.codex_startup)
+        self.field_tabs['codex_startup']=0;self.field_titles['codex_startup']='随 Codex 启动'
+        self.codex_startup.toggled.connect(lambda:self.edited('codex_startup'))
+        note=QLabel('登录时运行轻量监听；识别 Codex 桌面端，不依赖 Codex++。手动退出桌宠后，本次 Codex 使用期间不再拉起。关闭 Codex 不会强制退出桌宠。');note.setWordWrap(True);note.setStyleSheet(f'font-size:10px;color:{MUTED};');appearance.addRow(note)
         self.number(appearance,'scale','角色大小（倍）',.4,2.5,.1)
         for key,title in [('character_visible','显示人物（关闭后仅保留独立卡片）'),('on_top','始终置顶'),('video_fullscreen_yield','视频全屏时临时取消置顶（完成提醒优先）'),('mouse_through','鼠标穿透（从托盘找回）'),('bubble','显示状态卡片'),('quota_visible','显示额度和重置时间'),('commentary','展示 Codex 回复摘要')]:
             self.check(appearance,key,title)
@@ -64,6 +68,14 @@ class SettingsDialog(QDialog):
         self.mode=QComboBox();self.mode.addItem('自动：正常卡片 / 闲置时胶囊','auto');self.mode.addItem('胶囊：状态和快捷圆','mini');self.mode.addItem('极简：仅额度百分比','minimal')
         appearance.addRow('卡片显示模式',self.mode);self.fields['bubble_mode']=self.mode;self.field_tabs['bubble_mode']=0;self.field_titles['bubble_mode']='卡片显示模式'
         self.mode.currentIndexChanged.connect(lambda:self.edited('bubble_mode'))
+        from quick_actions import ACTIONS
+        self.shortcut=QComboBox()
+        for key,title,icon in ACTIONS:self.shortcut.addItem(title,key)
+        appearance.addRow('胶囊左侧快捷功能',self.shortcut);self.fields['capsule_action']=self.shortcut;self.field_tabs['capsule_action']=0;self.field_titles['capsule_action']='胶囊快捷功能'
+        self.shortcut.currentIndexChanged.connect(lambda:self.edited('capsule_action'))
+        self.website=QLineEdit();self.website.setPlaceholderText('https://…');self.website.setAccessibleName('自定义网页地址');self.website.setMaxLength(2048)
+        appearance.addRow('自定义网页地址',self.website);self.fields['capsule_website']=self.website;self.field_tabs['capsule_website']=0;self.field_titles['capsule_website']='自定义网页地址'
+        self.website.textChanged.connect(lambda:self.edited('capsule_website'))
         note=QLabel('仅卡片时可拖动空白处或极简圆；点击极简圆回到正常卡片，右键可切换显示模式。人物隐藏后暂停动画，Codex 联动继续。');note.setWordWrap(True);appearance.addRow(note)
         behavior=self.tab('动作与陪伴')
         self.section(behavior,'人物行为','先选择陪伴方式，再按需展开高级参数。')
@@ -209,16 +221,18 @@ class SettingsDialog(QDialog):
         for key,widget in self.fields.items():
             if isinstance(widget,QCheckBox):widget.setChecked(settings.get(key,DEFAULTS[key]))
             elif isinstance(widget,QComboBox):widget.setCurrentIndex(widget.findData(settings.get(key,DEFAULTS[key])))
+            elif isinstance(widget,QLineEdit):widget.setText(settings.get(key,DEFAULTS[key]))
             else:widget.setValue(settings.get(key,DEFAULTS[key])*self.factors.get(key,1))
         lines='\n'.join(settings.get('talk_lines',DEFAULTS['talk_lines']))
         current=[line.strip() for line in self.lines.toPlainText().splitlines() if line.strip()]
         if current!=settings.get('talk_lines',DEFAULTS['talk_lines']):self.lines.setPlainText(lines)
-        self.startup.setChecked(bool(settings.get('startup',False)));self._writing_widgets=False
+        self.startup.setChecked(bool(settings.get('startup',False)));self.codex_startup.setChecked(bool(settings.get('codex_startup',False)));self._writing_widgets=False
     def values_from_pet(self,read_startup=False):
         values={key:copy.deepcopy(self.pet.settings.get(key,DEFAULTS[key])) for key in self.fields}
         values['talk_lines']=copy.deepcopy(self.pet.settings.get('talk_lines',DEFAULTS['talk_lines']))
         if read_startup:
-            try:values['startup']=autostart_enabled()
+            from codex_startup import enabled
+            try:values['startup']=autostart_enabled();values['codex_startup']=enabled()
             except OSError:self.status.setText('开机启动状态读取失败；其他设置仍可修改。')
         return values
     def reload(self):
@@ -230,12 +244,14 @@ class SettingsDialog(QDialog):
     def edited(self,key):
         if self._writing_widgets or self.draft is None:return
         if key=='startup':value=self.startup.isChecked()
+        elif key=='codex_startup':value=self.codex_startup.isChecked()
         elif key=='talk_lines':value=[line.strip() for line in self.lines.toPlainText().splitlines() if line.strip()]
         else:
-            widget=self.fields[key];value=widget.isChecked() if isinstance(widget,QCheckBox) else widget.currentData() if isinstance(widget,QComboBox) else widget.value()/self.factors.get(key,1)
+            widget=self.fields[key];value=widget.isChecked() if isinstance(widget,QCheckBox) else widget.currentData() if isinstance(widget,QComboBox) else widget.text() if isinstance(widget,QLineEdit) else widget.value()/self.factors.get(key,1)
         self.draft.set(key,value);self.status.clear();self.update_draft_state()
     def update_draft_state(self,*args):
         if self.draft is None:return
+        self.website.setEnabled(self.shortcut.currentData()=='website')
         count=len(self.draft.dirty);self.apply_button.setEnabled(bool(count));self.discard_button.setEnabled(bool(count))
         text=f'有 {count} 项未保存修改 · Ctrl+S 应用 · 切页保留草稿' if count else '设置已保存 · Ctrl+S 应用修改'
         if self.draft.conflicts:
@@ -255,7 +271,7 @@ class SettingsDialog(QDialog):
             if tab==self.tabs.currentIndex() and key in DEFAULTS:self.draft.set(key,DEFAULTS[key])
         self.fill(self.draft.values);self.update_draft_state();self.status.setText('已载入本页默认值，应用后生效；不影响开机启动、角色及聊天服务。')
     def apply(self):
-        values=self.draft.changes();startup=values.pop('startup',None);messages=[]
+        values=self.draft.changes();startup=values.pop('startup',None);codex_startup=values.pop('codex_startup',None);messages=[]
         if values:
             try:
                 self.pet.apply_settings(values)
@@ -266,6 +282,10 @@ class SettingsDialog(QDialog):
         if startup is not None:
             try:set_autostart(startup);self.draft.rebase({'startup':startup});messages.append('开机启动已保存。')
             except OSError as error:messages.append('开机启动保存失败：'+str(error)+'；可单独重试。')
+        if codex_startup is not None:
+            from codex_startup import configure
+            try:configure(codex_startup);self.draft.rebase({'codex_startup':codex_startup});messages.append('Codex 启动联动已保存。')
+            except OSError as error:messages.append('Codex 启动联动保存失败：'+str(error)+'；可单独重试。')
         self.fill(self.draft.values);self.update_draft_state();self.status.setText('\n'.join(messages))
     def refresh_library(self):
         self.characters.clear()

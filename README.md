@@ -2,7 +2,7 @@
 
 ![文章海报](docs/media/cover.png)
 
-一只陪你使用 Codex 的 Windows 白龙桌宠：在桌面查看任务状态、接收完成提醒、追踪账户额度和 Token 用量。基于 [jingh12312-rgb/bailong-desktop-pet](https://github.com/jingh12312-rgb/bailong-desktop-pet) 持续改造，当前版本 **v0.7.9 / UI69**。
+一只陪你使用 Codex 的 Windows 白龙桌宠：在桌面查看任务状态、接收完成提醒、追踪账户额度和 Token 用量。基于 [jingh12312-rgb/bailong-desktop-pet](https://github.com/jingh12312-rgb/bailong-desktop-pet) 持续改造，当前版本 **v0.8.3 / UI73**。
 
 **[下载安装包](https://github.com/Wunsch2048/codex-bailong-desktop-pet/releases/latest)** · [快速部署](docs/快速部署说明.txt) · [全部新增功能](docs/新增功能说明.txt) · [开发说明](docs/DEVELOPMENT.md) · [迭代历史](docs/迭代历史.txt)
 
@@ -28,6 +28,15 @@
 | 胶囊展开正常面板 | 日报展开与收回 |
 | --- | --- |
 | ![胶囊展开](docs/report/assets/胶囊展开正常.gif) | ![日报动效](docs/report/assets/日报展开收回.gif) |
+
+### v0.8.3 更新（含此前本地迭代的 v0.8.1—v0.8.2）
+
+- **额外重置倒计时更清楚**：主卡片用小时与分钟显示，整小时保留 `00` 分，不足一分钟显示 `<1分钟`；每分钟原位更新。点击时间打开本地详情，右上角可跳转公告网站。
+- **修复待查看提醒残留**：按具体已结束轮次识别 Codex 的稳定已读证据；看过旧回复后提醒消失，其他未读会话和正在运行的任务不会被误清除。
+- **胶囊快捷按钮可自定义**：支持 GPT 网页、Codex、闲聊、日报、刷新、设置或自定义网址；可选在 Codex 桌面端启动时同步启动桌宠，并防止手动退出后重复拉起。
+- **本地验证**：739 项回归、81 个模块编译核验及四档系统缩放下的原生交互、倒计时布局和按钮验收通过。
+
+完整说明见[本次更新说明](docs/releases/v0.8.3.md)。完整 Windows ZIP用于首次安装和从 v0.7.9 及更早版本升级；程序 ZIP/JSON仅供支持程序小包的现有安装使用。素材仍独立校验和维护。
 
 ### v0.7.9 更新（含 v0.7.3—v0.7.8）
 

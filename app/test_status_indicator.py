@@ -85,6 +85,30 @@ class IndicatorTests(unittest.TestCase):
         self.assertEqual(self.icon.visual(),'attention');self.assertFalse(self.icon.timer.isActive())
         self.icon.acknowledge();self.assertEqual(self.icon.visual(),'complete')
         self.now+=1;self.icon._tick();self.assertEqual(self.icon.visual(),'busy');self.assertTrue(self.icon.timer.isActive())
+    def test_read_old_failed_turn_removes_roster_notice_and_never_resurrects(self):
+        import sqlite3
+        from contextlib import closing
+        from session_read_state import ReadAcknowledgements
+        from conversation_roster import ConversationRoster
+        with tempfile.TemporaryDirectory() as folder:
+            home=Path(folder);store=home/'notifications.json';self.icon.set_store(store,home)
+            (home/'.codex-global-state.json').write_text(json.dumps({'electron-thread-read-state-v1':dict(version=1,unreadByIdentity={'account':{'local:host':['b']}})}),encoding='utf-8')
+            with closing(sqlite3.connect(home/'thread_history_1.sqlite')) as db,db:
+                db.execute('CREATE TABLE thread_turns(thread_id TEXT,turn_id TEXT,status TEXT,rollout_ordinal INTEGER)')
+                db.executemany('INSERT INTO thread_turns VALUES (?,?,?,?)',[('a','old','failed',1),('a','new','inProgress',2),('b','done','completed',1)])
+            roster=ConversationRoster()
+            for event in [dict(kind='complete',session='a',turn='old'),dict(kind='complete',session='b',turn='done')]:
+                self.icon.notify_complete(event);roster.observe(event)
+            running=dict(kind='status',session='a',turn='new',state='working',active=1)
+            self.icon.observe(running);roster.observe(running)
+            reader=ReadAcknowledgements();self.assertEqual(reader.poll(home,self.icon.unread,100),[])
+            self.now=104;keys=reader.poll(home,self.icon.unread,104)
+            self.assertTrue(self.icon.acknowledge_seen(keys));self.assertEqual(self.icon.unread,[('b','done')])
+            chosen,_=roster.selection(self.icon.unread)
+            self.assertEqual([(v['session'],v['state']) for v in chosen],[('b','complete'),('a','working')])
+            restored=StatusIndicator();restored.set_store(store,home)
+            self.assertEqual(restored.unread,[('b','done')]);self.assertFalse(restored.notify_complete(dict(session='a',turn='old')))
+            restored.deleteLater()
     def test_hidden_and_idle_have_no_animation_timer(self):
         self.assertFalse(self.icon.timer.isActive())
         self.icon.observe(dict(state='working',active=1));start=self.icon.busy_since

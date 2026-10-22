@@ -8,7 +8,7 @@ initial_hashes=current_sources()
 def run(path):
     began=time.monotonic()
     with tempfile.TemporaryDirectory(prefix='bailong-regression-') as folder:
-        env=os.environ.copy();env.update(LOCALAPPDATA=folder,CODEX_HOME=str(Path(folder)/'codex'),QT_QPA_PLATFORM='offscreen',PYTHONIOENCODING='utf-8')
+        env=os.environ.copy();env.update(LOCALAPPDATA=folder,APPDATA=str(Path(folder)/'roaming'),CODEX_HOME=str(Path(folder)/'codex'),QT_QPA_PLATFORM='offscreen',PYTHONIOENCODING='utf-8')
         code="import faulthandler,unittest;faulthandler.dump_traceback_later(65);unittest.main(module="+repr(path.stem)+",verbosity=2)"
         p=subprocess.Popen([sys.executable,'-c',code],cwd=path.parent,env=env,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
         try:

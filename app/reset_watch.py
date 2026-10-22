@@ -74,8 +74,8 @@ def schedule_text(snapshot,now=None):
     item=pending_reset(snapshot)
     if not snapshot:return '下轮额外重置：正在查询…'
     if not item:return '下轮额外重置：暂未公布'
-    title='备用重置' if item['reset_type']=='banked' else '额外重置'
-    stamp=item.get('scheduled')
+    title='备用重置' if item.get('reset_type')=='banked' else '额外重置'
+    stamp=epoch(item.get('scheduled'))
     if stamp is None:return f'{title}已安排 · 时间待公布'
     if stamp<=now:return f'{title}预计 {local_time(stamp)} · 已过，待确认'
     return f'{title}预计最晚 {local_time(stamp)}（北京时间）'
