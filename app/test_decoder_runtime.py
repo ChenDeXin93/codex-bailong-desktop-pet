@@ -14,7 +14,7 @@ APP=QApplication.instance() or QApplication([])
 
 class DecoderRuntimeTests(unittest.TestCase):
     def setUp(self):
-        self.tmp=tempfile.TemporaryDirectory();self.root=Path(self.tmp.name)
+        self.tmp=tempfile.TemporaryDirectory();self.root=Path(self.tmp.name).resolve()
         self.path=self.root/'red.webp';self.blue=self.root/'blue.webp'
         for path,color in ((self.path,(200,0,0,255)),(self.blue,(0,0,200,255))):
             frames=[Image.new('RGBA',(16,16),(*color[:2],color[2]+i,color[3])) for i in range(10)]

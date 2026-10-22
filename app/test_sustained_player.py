@@ -23,7 +23,8 @@ def drain(player):
 
 class SegmentTests(unittest.TestCase):
     def setUp(self):
-        self.tmp=tempfile.TemporaryDirectory();self.root=Path(self.tmp.name);self.source=self.root/'source.webp';self.seam=self.root/'seam.webp'
+        # Hosted Windows TEMP may contain RUNNER~1; profiles use resolved paths.
+        self.tmp=tempfile.TemporaryDirectory();self.root=Path(self.tmp.name).resolve();self.source=self.root/'source.webp';self.seam=self.root/'seam.webp'
         frames=[Image.new('RGBA',(16,16),(20*i,40,80,255)) for i in range(10)]
         frames[0].save(self.source,save_all=True,append_images=frames[1:],duration=42,lossless=True)
         frames[6].save(self.seam,save_all=True,append_images=[frames[5]],duration=42,lossless=True)
