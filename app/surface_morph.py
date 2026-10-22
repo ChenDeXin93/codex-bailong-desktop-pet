@@ -32,7 +32,7 @@ def complete_frame(bubble):
     size=bubble.content.size();ratio=bubble.devicePixelRatioF()
     image=QPixmap(pixel_size(size.width(),ratio),pixel_size(size.height(),ratio));image.setDevicePixelRatio(ratio);image.fill(Qt.GlobalColor.transparent)
     p=QPainter(image);p.setRenderHint(QPainter.RenderHint.Antialiasing)
-    if not bubble.is_island():
+    if not bubble.is_compact():
         p.setBrush(QColor(SURFACE));p.setPen(QPen(QColor('#e0d9e6'),1))
         p.drawRoundedRect(QRectF(0,0,size.width(),size.height()).adjusted(.5,.5,-.5,-.5),PANEL_RADIUS,PANEL_RADIUS)
     bubble.content.render(p,QPoint(),QRegion(),QWidget.RenderFlag.DrawChildren);p.end()
@@ -45,7 +45,7 @@ def snapshot(widget,children_only=False,skip=None):
     if children_only:
         painter=QPainter(image)
         for child in widget.findChildren(QWidget,options=Qt.FindChildOption.FindDirectChildrenOnly):
-            if child.isVisible() and child is not skip:child.render(painter,child.pos(),QRegion(),QWidget.RenderFlag.DrawChildren)
+            if child.isVisibleTo(widget) and child is not skip:child.render(painter,child.pos(),QRegion(),QWidget.RenderFlag.DrawChildren)
         painter.end()
     else:widget.render(image,QPoint(),QRegion(),QWidget.RenderFlag.DrawChildren)
     return image
@@ -62,28 +62,31 @@ class SurfaceState:
     frame:QPixmap=None
     frame_origin:QPointF=None
     screen_origin:QPointF=None
+    radius:float=PANEL_RADIUS
 
     @classmethod
     def capture(cls,bubble,origin=None):
         origin=bubble.pos() if origin is None else origin;island=bubble.is_island()
-        root=bubble.island if island else bubble.content
+        minimal=bubble.is_minimal()
+        root=bubble.island if island else bubble.minimal_quota if minimal else bubble.content
         offset=root.mapTo(bubble.content,QPoint())
         rect=QRectF(QPointF(origin+offset),QSizeF(root.size()))
-        icon=bubble.status_indicator;icon_pos=icon.mapTo(root,QPoint())
+        icon=bubble.status_indicator;icon_pos=icon.mapTo(root,QPoint()) if not minimal else QPoint()
         image=snapshot(root,children_only=island,skip=icon)
         # Extract the shared glyph so it follows one path instead of appearing
         # twice in two fading, differently positioned screenshots.
         clear=QPainter(image);clear.setCompositionMode(QPainter.CompositionMode.CompositionMode_Clear)
         clear.fillRect(QRectF(QPointF(icon_pos),QSizeF(icon.size())),Qt.GlobalColor.transparent);clear.end()
-        glyph=snapshot(icon);glyph_rect=QRectF(QPointF(origin+offset+icon_pos),QSizeF(icon.size()))
+        glyph=snapshot(icon) if not minimal else QPixmap();glyph_rect=QRectF(QPointF(origin+offset+icon_pos),QSizeF(icon.size())) if not minimal else QRectF(rect.center(),QSizeF(0,0))
+        if minimal:image=snapshot(root)
         satellites=[]
         if island:
             for name in ('island_chat','island_quota'):
-                widget=next((w for w in bubble.findChildren(QToolButton,name) if w.isVisible()),None)
+                widget=next((w for w in bubble.findChildren(QToolButton,name) if w.isVisibleTo(bubble.content)),None)
                 if widget:
                     pos=widget.mapTo(bubble.content,QPoint());satellites.append((QRectF(QPointF(origin+pos),QSizeF(widget.size())),snapshot(widget)))
         screen=bubble.screen()
-        return cls(rect,image,glyph_rect,glyph,island,satellites,complete_frame(bubble),QPointF(origin),QPointF(screen.geometry().topLeft()) if screen else QPointF())
+        return cls(rect,image,glyph_rect,glyph,island,satellites,complete_frame(bubble),QPointF(origin),QPointF(screen.geometry().topLeft()) if screen else QPointF(),root.height()/2 if island or minimal else PANEL_RADIUS)
 
 
 def mix_rect(a,z,f):
@@ -151,7 +154,7 @@ class SurfaceMorph:
         f=container_progress(time);blend=stage(time,0.,.42)
         ca=QColor(ISLAND if a.island else SURFACE);cz=QColor(ISLAND if z.island else SURFACE)
         color=QColor(*[round(x+(y-x)*blend) for x,y in zip(ca.getRgb(),cz.getRgb())])
-        radius=(22. if a.island else PANEL_RADIUS)+((22. if z.island else PANEL_RADIUS)-(22. if a.island else PANEL_RADIUS))*f
+        radius=a.radius+(z.radius-a.radius)*f
         # Match the live widget's inset fill/stroke, including antialiased alpha.
         # Filling the entire uninset rect left a brighter edge at handoff.
         inset=rect.adjusted(.5,.5,-.5,-.5)

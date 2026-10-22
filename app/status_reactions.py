@@ -113,6 +113,31 @@ class StatusReactions:
     def busy(self,now):
         return self.present is not False and any(self.fresh(event,now) and event['state'] in ACTIVE
             for event in self.sessions.values())
+    def record(self,result,now):
+        self.last=result;self.last_at=now;self.next_sample=max(self.next_sample,now+self.interval)
+        key=(result.session,result.turn,result.action_id);self.played[key]=now;self.played.move_to_end(key)
+        while len(self.played)>64:self.played.popitem(last=False)
+        return result
+    def take_completion(self,now):
+        if self.completion and now-self.completion['received']>120:self.completion=None
+        if not self.completion or now<self.earliest:return None
+        event=self.completion;self.completion=None
+        return self.record(Reaction('complete','18',event['session'],event['turn']),now)
+    def take_opening(self,now):
+        if self.present is False or now<self.earliest:return None
+        for key,event in list(self.openings.items()):
+            current=self.sessions.get(key[0],{})
+            self.openings.pop(key)
+            if now-event['received']<=45 and current.get('turn')==key[1] and current.get('state') in ACTIVE and self.fresh(current,now):
+                return self.record(Reaction('received','work01',*key),now)
+        return None
+    def take_current(self,result,now):
+        if result is None or now<self.earliest:return None
+        key=(result.session,result.turn,result.action_id)
+        repeat=self.interval if result.action_id in {'work02','work03','work04','work05'} else 60
+        if now-self.played.get(key,-1e9)<repeat:return None
+        self.sample_count+=1
+        return self.record(result,now)
     def poll(self,now,*,boundary,allowed=True):
         if not boundary or not allowed or now<self.earliest:return None
         if self.completion and now-self.completion['received']>120:self.completion=None

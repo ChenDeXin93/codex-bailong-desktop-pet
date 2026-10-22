@@ -1,17 +1,28 @@
 """One background update operation, explicit installation, and silent periodic checks."""
 import threading,time
 from PySide6.QtCore import QObject,QThread,QTimer,Signal
-from app_updates import check_release,stage_installer,version_tuple,prune_completed,UpdateError,UpdateCancelled,NoRelease
+from app_updates import check_release,stage_installer,version_tuple,prune_completed,UpdateError,UpdateCancelled,NoRelease,ensure_checksum
 
 class UpdateJob(QThread):
-    result=Signal(object);failed=Signal(str,str);progress=Signal(int,int,str)
+    result=Signal(object);failed=Signal(str,str);progress=Signal(int,int,str);selected=Signal(object)
     def __init__(self,current,cache,release=None,parent=None):
         super().__init__(parent);self.current=current;self.cache=cache;self.release=release;self.cancel=threading.Event()
     def run(self):
         try:
             if self.release is None:
                 prune_completed(self.cache,self.current);value=check_release(self.current,cancel=self.cancel.is_set)
-            else:value=stage_installer(self.release,self.cache,lambda n,total,phase:self.progress.emit(n,total,phase),self.cancel.is_set)
+            else:
+                progress=lambda n,total,phase:self.progress.emit(n,total,phase)
+                if self.release.kind=='program':
+                    from program_updates import stage_program,MaterialMismatch
+                    from pet import ROOT
+                    try:value=stage_program(self.release,self.cache,ROOT,progress,self.cancel.is_set)
+                    except MaterialMismatch:
+                        if not self.release.fallback:raise UpdateError('本地素材发生变化，且该版本未提供完整包')
+                        from dataclasses import replace
+                        self.release=ensure_checksum(replace(self.release.fallback,reason='素材在检查后变化，改用完整安装包'),cancel=self.cancel.is_set)
+                        self.selected.emit(self.release);value=stage_installer(self.release,self.cache,progress,self.cancel.is_set)
+                else:value=stage_installer(self.release,self.cache,progress,self.cancel.is_set)
             if not self.cancel.is_set():self.result.emit(value)
             else:self.failed.emit('cancelled','下载已暂停，可稍后继续')
         except UpdateCancelled as exc:self.failed.emit('cancelled',str(exc))
@@ -40,7 +51,9 @@ class UpdateController(QObject):
     def _automatic(self):
         if self.enabled:self.check()
     def _bind(self,job):
-        self.job=job;job.result.connect(self._result);job.failed.connect(self._failed);job.progress.connect(self._progress);job.finished.connect(self._finished);self.changed.emit(self.snapshot());job.start()
+        self.job=job;job.result.connect(self._result);job.failed.connect(self._failed);job.progress.connect(self._progress);job.selected.connect(self._selected);job.finished.connect(self._finished);self.changed.emit(self.snapshot());job.start()
+    def _selected(self,release):
+        self.release=release;self.publish(package_kind=release.kind,package_reason=release.reason,total=release.size,downloaded=0,message=release.reason)
     def check(self):
         if self.closing or self.job is not None:return False
         self.publish(phase='checking',message='正在检查公开稳定版…')
@@ -59,7 +72,7 @@ class UpdateController(QObject):
             if self.state.get('latest')!=value.version:self.state['downloaded']=0
             self.release=value;cmp=(version_tuple(value.version)>version_tuple(self.current))-(version_tuple(value.version)<version_tuple(self.current))
             message='发现新版本，可查看说明后下载并安装' if cmp>0 else '已是最新公开版本' if cmp==0 else '本机版本较新，公开稳定版为 '+value.version
-            self.publish(phase='available' if cmp>0 else 'current',message=message,latest=value.version,notes=value.notes,total=value.size,checked=time.time(),url=value.url)
+            self.publish(phase='available' if cmp>0 else 'current',message=message,latest=value.version,notes=value.notes,total=value.size,checked=time.time(),url=value.url,package_kind=value.kind,package_reason=value.reason)
         else:
             self.publish(phase='ready',message='校验通过，正在启动安装器…')
             if self.install_requested:self.installerReady.emit(str(value))
@@ -68,7 +81,7 @@ class UpdateController(QObject):
         if not self.closing:self.publish(phase=phase,message=message,checked=time.time())
     def _progress(self,n,total,phase):
         if self.closing or self.job and self.job.cancel.is_set():return
-        messages={'downloading':'正在下载安装包…','verifying':'下载完成，正在校验…','extracting':'校验通过，正在准备安装器…','ready':'安装程序已就绪'}
+        messages={'materials':'正在校验可复用的本地素材…','downloading':'正在下载更新包…','verifying':'下载完成，正在校验…','extracting':'正在准备程序与本地素材…','ready':'安装程序已就绪'}
         self.publish(phase=phase,message=messages[phase],downloaded=n,total=total)
     def _finished(self):
         job=self.job;self.job=None

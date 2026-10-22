@@ -10,8 +10,8 @@ import sys
 import time
 from collections import deque
 from pathlib import Path
-from PySide6.QtCore import Qt,QTimer,QPoint,QRectF,QUrl,QEvent,Signal
-from PySide6.QtGui import QPainter,QCursor,QDesktopServices
+from PySide6.QtCore import Qt,QTimer,QPoint,QPointF,QRect,QRectF,QUrl,QEvent,Signal
+from PySide6.QtGui import QPainter,QCursor,QDesktopServices,QTransform
 from PySide6.QtWidgets import QApplication,QMenu,QSystemTrayIcon,QFileDialog,QMessageBox
 from enhanced import EnhancedPet,STATE_DIR,CONFIG
 from pet import ROOT,ASSETS,clamp_position
@@ -22,6 +22,9 @@ from desktop_core import (VERSION,DEFAULTS,normalized,atomic_json,ActionGate,phy
 from desktop_services import all_items,validate_character,open_codex,autostart_enabled,set_autostart
 from stream_player import StreamPlayer
 from status_reactions import StatusReactions
+from continuous_work import ContinuousWork
+from sustained_player import SustainedPlayback
+from sustained_assets import profile_paths,seam_items
 
 class DesktopPet(EnhancedPet):
     LAZY=True
@@ -29,6 +32,7 @@ class DesktopPet(EnhancedPet):
     connectionHealthChanged=Signal(dict)
     def __init__(self,monitor=True):
         self._video_yielded=False;self.video_yield=None
+        self._desktop_hidden=False;self._card_anchor=None;self._visibility_ready=False
         self.settings_revision=0
         from codex_connection import data_home,saved_paths
         from connection_health import CapabilityHealth
@@ -36,15 +40,24 @@ class DesktopPet(EnhancedPet):
         try:previous=json.loads((STATE_DIR/'runtime.json').read_text(encoding='utf-8')).get('connection_health')
         except (OSError,ValueError):previous=None
         self.connection_health=CapabilityHealth(data_home(),previous)
-        self.player=None;self.gate=ActionGate();self.asset_root=ASSETS
+        from material_store import MaterialStore
+        self.material_store=MaterialStore(ROOT,STATE_DIR);self._pending_material=None
+        self.player=None;self.gate=ActionGate();self.asset_root=self.material_store.root
+        self.animation_wakeups=0;self.movement_wakeups=0
+        self.sustained=SustainedPlayback();self.continuous=ContinuousWork();self._resume_idle=False
         self._interactive_action=False;self._manual_action=False;self._priority=0
         self._hit_image=None;self.throwing=False;self.velocity=(0.,0.)
+        self._pointer_pressed=False;self._pointer_epoch=0
         self.drag_samples=deque(maxlen=12);self.press_feedback=0;self.buffer_until=0
         self.pending_completion=None;self.settings_dialog=None;self.chat_window=None
         self.reactions=StatusReactions(time.monotonic());self.last_reaction=None
         self.character_dir=STATE_DIR/'characters';self.character_dir.mkdir(exist_ok=True)
         self.created_at=time.monotonic();self.decode_error=None
         super().__init__(monitor)
+        # A hidden Qt/native owner can also suppress its tool windows. Keep a
+        # logical owner for data/placement, with an independent native card.
+        self.bubble.setParent(None,self.bubble.windowFlags())
+        self.bubble._owner=self
         from codex_navigation import CodexNavigation
         self.codex_navigation=CodexNavigation(lambda session:open_codex(session),self)
         self.codex_navigation.error.connect(lambda text:self.say(text,6000))
@@ -53,6 +66,10 @@ class DesktopPet(EnhancedPet):
         self.updates.installerReady.connect(self.install_app_update)
         self.updates.changed.connect(self.app_update_state)
         self._update_exit_pending=False
+        from material_controller import MaterialController
+        self.materials=MaterialController(self.material_store,self)
+        self.materials.ready.connect(self.queue_material)
+        self._material_exit_pending=False
         self.reactions.set_actions(item['id'] for item in all_items(self.manifest))
         self.bubble.reportRequested.connect(self.open_report)
         self.bubble.settingsRequested.connect(self.open_settings)
@@ -64,6 +81,8 @@ class DesktopPet(EnhancedPet):
         if self.settings.get('schema')!=2 and CONFIG.exists():
             shutil.copy2(CONFIG,STATE_DIR/'settings-before-0.5.0.json')
         self.settings=normalized(self.settings)
+        self._visibility_ready=True
+        self._card_anchor=self.settings.get('card_anchor')
         self.walk_direction=self.settings['facing']
         self.apply_settings({},save=False)
         chosen=self.settings.get('character','builtin')
@@ -83,6 +102,7 @@ class DesktopPet(EnhancedPet):
             from video_yield import VideoYield
             self.video_yield=VideoYield(self)
         self.save_settings()
+        self.schedule_animation()
 
     def asset_path(self,item):
         name=item.get('playbackFile') or item['file'].replace('.webm','.webp')
@@ -91,8 +111,10 @@ class DesktopPet(EnhancedPet):
         return path
 
     def play(self,item,mode):
+        if self._visibility_ready and (self._desktop_hidden or not self.settings.get('character_visible',True)):return False
         if self._interactive_action and mode=='variant':mode='click'
         if not self.gate.request(mode,item,force=self._interactive_action or self._manual_action):return False
+        self.sustained.cancel()
         if self.player is None:self.player=StreamPlayer()
         try:
             frame=self.player.start(self.asset_path(item),self.frame_size,item.get('durationMs',4000)/1000,cache_loop=mode=='idle')
@@ -105,6 +127,7 @@ class DesktopPet(EnhancedPet):
             raise
         self.frames=[frame];self._hit_image=frame.toImage();self.current=item;self.mode=mode;self.index=0
         self.started=time.monotonic();self.transition=None;self.update_frame()
+        self.schedule_animation()
         return True
 
     def idle(self):
@@ -113,12 +136,46 @@ class DesktopPet(EnhancedPet):
 
     @measured('pet_animation_event')
     def animate(self):
+        self.animation_wakeups+=1
+        try:self._animate_frame()
+        finally:self.schedule_animation()
+
+    def schedule_movement(self):
+        if not hasattr(self,'motion_timer') or not self.motion_timer.isActive():return
+        active=self.walking or self.throwing
+        interval=33 if active else 1000
+        if not active and self.settings.get('self_talk'):
+            interval=max(1,min(1000,math.ceil((self.next_talk-time.monotonic())*1000)))
+        if self.motion_timer.interval()!=interval:
+            if active:self.motion_clock=time.monotonic()
+            self.motion_timer.setInterval(interval)
+
+    def schedule_animation(self):
+        self.schedule_movement()
+        if not hasattr(self,'tick') or not self.tick.isActive() or not self.player:return
+        speed=self.settings.get('playback_speed',1)*self.sustained.speed_factor(self.player)
+        interval=self.player.next_delay_ms(speed)
+        if self.press_feedback and time.monotonic()-self.press_feedback<.5:interval=min(16,interval)
+        self.tick.setInterval(interval)
+
+    def _animate_frame(self):
         if self.player is None or not self.current:return
-        frame,ended=self.player.advance(self.frame_size,getattr(self,'settings',{}).get('playback_speed',1))
+        if getattr(self,'_visibility_ready',False) and (self._desktop_hidden or not self.settings.get('character_visible',True)):return
+        now=time.monotonic()
+        desired=self.continuous.target(self.reactions,now,self.status_animation_allowed())
+        was_sustained=self.sustained.active
+        if was_sustained:
+            owner=self.sustained.owner
+            self.sustained.request(bool(not self._pending_material and desired and (desired.session,desired.turn,desired.action_id)==(owner.session,owner.turn,owner.action_id)))
+        frame,ended=self.player.advance(self.frame_size,getattr(self,'settings',{}).get('playback_speed',1)*self.sustained.speed_factor(self.player))
         if frame is not None:
             self.frames=[frame];self.index=0;self._hit_image=frame.toImage();self.update_frame()
         if self.press_feedback and time.monotonic()-self.press_feedback<.5:self.update()
         if ended:
+            if was_sustained:
+                frame,finished=self.sustained.boundary(self.player,self.frame_size)
+                if not finished:
+                    self.frames=[frame];self.index=0;self._hit_image=frame.toImage();self.update_frame();return
             if self.player.error:
                 self.decode_error=self.player.error
                 if self.enhanced_ready:self.say('这段素材读取失败，已回到待机。',5000)
@@ -127,19 +184,40 @@ class DesktopPet(EnhancedPet):
             previous=self.mode;self.gate.finish();now=time.monotonic()
             if previous!='idle':
                 dedicated=previous=='reaction' and str(self.current.get('id','')).startswith('work')
-                self.reactions.finished(now,max(2 if dedicated else 8,self.settings.get('action_gap',2)))
+                self.reactions.finished(now,0 if was_sustained else max(2 if dedicated else 8,self.settings.get('action_gap',2)))
                 self.buffer_until=now+max(.8,self.settings.get('action_gap',2))
             if previous in ('click','landing','task','quota','reaction'):self.next_chain=self.buffer_until+self.settings.get('random_interval',25)
+            if self._pending_material:self.apply_material()
             if self.play_status_reaction(now):return
             if previous=='idle' and self.autonomous_boundary(now):return
             self.idle()
 
+    def status_animation_allowed(self):
+        return self.isVisible() and self.settings.get('status_actions',True) and not (self.dragging or self.throwing or self.walking)
+
     def play_status_reaction(self,now):
-        allowed=self.isVisible() and self.settings.get('status_actions',True) and not (self.dragging or self.throwing or self.walking)
-        if self.gate.state!='idle':return False
-        selected=self.reactions.poll(now,boundary=bool(self.player and self.player.ended),allowed=allowed)
-        if selected is None:return False
+        if self.gate.state!='idle' or not self.status_animation_allowed() or not self.player or not self.player.ended:return False
+        selected=self.reactions.take_completion(now) or self.reactions.take_opening(now)
+        desired=self.continuous.target(self.reactions,now)
         items={item['id']:item for item in all_items(self.manifest)}
+        if selected is None and desired and now>=self.reactions.earliest:
+            item=items.get(desired.action_id)
+            try:profile=profile_paths(self.asset_root,item) if item else None
+            except (OSError,ValueError,KeyError):profile=None;self.decode_error='invalid_sustained_profile'
+            if profile:
+                if not self.gate.request('reaction',item):return False
+                try:frame=self.sustained.begin(self.player,profile,desired,self.frame_size)
+                except (OSError,ValueError):
+                    self.sustained.cancel();self.gate.state='idle';self.decode_error='sustained_start_failed';return False
+                self.current=item;self.mode='reaction';self.frames=[frame];self.index=0;self._hit_image=frame.toImage()
+                self.started=now;self.transition=None;self.update_frame()
+                self.continuous.commit(desired);self.last_reaction=desired;self.reactions.record(desired,now)
+                return True
+            selected=self.reactions.take_current(desired,now)
+        # Paused feedback remains a one-shot, independent of active-state loops.
+        if selected is None and self.reactions.latest and self.reactions.latest.get('state')=='interrupted':
+            selected=self.reactions.poll(now,boundary=True)
+        if selected is None:return False
         item=items.get(selected.action_id)
         # Imported characters need an actual corresponding action. Do not
         # substitute an unrelated random animation when a mapping is absent.
@@ -147,6 +225,7 @@ class DesktopPet(EnhancedPet):
         if selected.kind=='complete':self.pending_completion=None
         mode='task' if selected.kind=='complete' else 'reaction'
         if not self.play(item,mode):return False
+        if selected.kind not in ('complete','received'):self.continuous.commit(selected)
         self.last_reaction=selected
         return True
 
@@ -166,15 +245,19 @@ class DesktopPet(EnhancedPet):
         if selected=='variant' and self.variants:self.choose(random.choice(self.variants));return True
         return False
 
-    def draw_frame(self,painter,canvas):
-        painter.save()
+    def frame_transform(self,canvas):
+        transform=QTransform()
         elapsed=time.monotonic()-self.press_feedback if self.press_feedback else 99
         if elapsed<.5:
             squash=math.sin(elapsed/.5*math.pi*2)*.075*math.exp(-elapsed*5)
-            painter.translate(canvas.center().x(),canvas.bottom())
-            painter.scale(1+squash,1-squash);painter.translate(-canvas.center().x(),-canvas.bottom())
+            transform.translate(canvas.center().x(),canvas.bottom())
+            transform.scale(1+squash,1-squash);transform.translate(-canvas.center().x(),-canvas.bottom())
         if getattr(self,'walk_direction',1)<0:
-            painter.translate(canvas.x()*2+canvas.width(),0);painter.scale(-1,1)
+            transform.translate(canvas.x()*2+canvas.width(),0);transform.scale(-1,1)
+        return transform
+
+    def draw_frame(self,painter,canvas):
+        painter.save();painter.setTransform(self.frame_transform(canvas),True)
         # The base EnhancedPet mirrors only during walking; call Pet directly.
         from pet import Pet
         Pet.draw_frame(self,painter,canvas);painter.restore()
@@ -184,23 +267,27 @@ class DesktopPet(EnhancedPet):
             from ctypes import wintypes
             msg=wintypes.MSG.from_address(int(message))
             if msg.message==0x84: # WM_NCHITTEST. Preserve soft alpha in the layered window.
-                x=ctypes.c_short(msg.lParam&0xffff).value;y=ctypes.c_short((msg.lParam>>16)&0xffff).value
-                pos=self.mapFromGlobal(QPoint(x,y))
-                if not self.alpha_hit(pos.x(),pos.y()):return True,-1
+                from native_coordinates import client_position,message_position
+                pos=client_position(msg.hWnd,*message_position(msg.lParam),self.width(),self.height())
+                # Conversion failure delegates to Qt instead of making the pet unclickable.
+                if pos is not None and not self.alpha_hit(*pos):return True,-1
         return super().nativeEvent(event_type,message)
 
     def alpha_hit(self,x,y):
         if self.settings.get('mouse_through'):return False
         if not self.frames or not self.current:return False
-        scale=self.current.get('renderScale',1);offset=self.current.get('renderOffset',[0,0])
-        if self.walk_direction<0:x=self.width()-1-x
-        w=self.width()*scale;h=self.height()*scale
-        fx=int((x-(self.width()-w)/2-self.width()*offset[0])/w*self.frames[0].width())
-        fy=int((y-(self.height()-h)-self.height()*offset[1])/h*self.frames[0].height())
-        image=self._hit_image or self.frames[0].toImage()
+        if not (0<=x<self.width() and 0<=y<self.height()):return False
+        canvas=QRectF(self.rect());inverse,valid=self.frame_transform(canvas).inverted()
+        if not valid:return False
+        point=inverse.map(QPointF(x,y));target=self.frame_target(canvas)
+        if target.isEmpty() or not target.contains(point):return False
+        image=self._hit_image or self.frames[self.index].toImage()
+        fx=math.floor((point.x()-target.x())/target.width()*image.width())
+        fy=math.floor((point.y()-target.y())/target.height()*image.height())
         return 0<=fx<image.width() and 0<=fy<image.height() and image.pixelColor(fx,fy).alpha()>=12
 
     def choose(self,item,interactive=False,manual=False):
+        if self._visibility_ready and (self._desktop_hidden or not self.settings.get('character_visible',True)):return
         if not interactive and not manual and self.gate.state not in ('idle','turn','walk','variant'):return
         if interactive and self.gate.state=='task':return
         self.stop_walk();self.throwing=False
@@ -240,6 +327,11 @@ class DesktopPet(EnhancedPet):
         self.walking=True;self.gate.state='idle';self.play(random.choice(pool),'walk');self.gesture_until=time.monotonic()+15
 
     def motion_tick(self):
+        self.movement_wakeups+=1
+        try:self._move_frame()
+        finally:self.schedule_movement()
+
+    def _move_frame(self):
         if not self.enhanced_ready:return
         now=time.monotonic();dt=now-self.motion_clock;self.motion_clock=now
         if not self.isVisible():return
@@ -268,12 +360,16 @@ class DesktopPet(EnhancedPet):
                 finally:self._priority=0;self._allow_talk_busy=False
 
     def mousePressEvent(self,event):
+        if event.button()==Qt.MouseButton.LeftButton:
+            self._pointer_epoch+=1;self._pointer_pressed=True
         self.throwing=False
         if self.mode=='throw':self.gate.state='idle';self.idle()
         self.press_feedback=time.monotonic();self.drag_samples.clear();self.drag_samples.append((time.monotonic(),self.x(),self.y()))
         super().mousePressEvent(event)
+        self.schedule_animation()
     def mouseMoveEvent(self,event):
         if self.settings.get('no_move'):return
+        if not self._pointer_pressed and not self.dragging:return
         # User dragging is the highest priority; it can interrupt a task gesture.
         if event.buttons()&Qt.MouseButton.LeftButton and not self.dragging and hasattr(self,'press_pos'):
             if (event.globalPosition().toPoint()-self.press_pos).manhattanLength()>8:self.gate.state='idle'
@@ -281,6 +377,9 @@ class DesktopPet(EnhancedPet):
         if self.dragging:self.gate.state='drag';self.drag_samples.append((time.monotonic(),self.x(),self.y()))
     def mouseReleaseEvent(self,event):
         if event.button()!=Qt.MouseButton.LeftButton:return
+        had_press=self._pointer_pressed or self.dragging
+        self._pointer_pressed=False;self._pointer_epoch+=1
+        if not had_press:return
         if self.dragging:
             self.dragging=False;self.last_click=None;self.click_timer.stop();self.gate.state='idle'
             samples=[s for s in self.drag_samples if time.monotonic()-s[0]<.15]
@@ -295,6 +394,17 @@ class DesktopPet(EnhancedPet):
             else:self.play(self.manifest.get('landingAnimation') or self.idles[0],'landing')
             self.bubble.redraw();self.position_bubble();self.save_settings();return
         super().mouseReleaseEvent(event)
+
+    def cancel_pointer(self):
+        """A lost grab has no release event; finish safely without a click or throw."""
+        if not (self._pointer_pressed or self.dragging):return
+        self._pointer_pressed=False;self._pointer_epoch+=1;self.dragging=False
+        self.drag_samples.clear();self.last_click=None;self.click_timer.stop()
+        if self.mode=='drag':self.gate.state='idle';self.idle()
+        if self.enhanced_ready:self.bubble.redraw();self.position_bubble()
+
+    def cancel_lost_grab(self,epoch):
+        if epoch==self._pointer_epoch:self.cancel_pointer()
 
     @measured('ui_activity')
     def on_activity(self,event):
@@ -350,13 +460,20 @@ class DesktopPet(EnhancedPet):
 
     def apply_settings(self,values,save=True):
         previous=copy.deepcopy(self.settings)
+        if previous.get('character_visible',True) and values.get('character_visible') is False:
+            self.remember_card_anchor(self.bubble.content_geometry())
         old_size=self.height();foot=self.geometry().bottom()+1;center=self.geometry().center().x()
         self.settings.update(values);self.settings=normalized(self.settings)
+        if (self.settings['no_move'] or self.settings['mouse_through'] or
+            self.settings['scale']!=previous.get('scale') or self.settings['on_top']!=previous.get('on_top')):
+            self.cancel_pointer()
         self.reactions.configure(self.settings['status_action_interval'],time.monotonic())
         if hasattr(self,'updates'):self.updates.configure(self.settings['update_checks'])
         for attr in ('wandering','random_actions','commentary','sound'):setattr(self,attr,self.settings[attr])
         self.bubble.enabled=self.settings['bubble'];self.bubble.show_quota=self.settings['quota_visible']
         self.bubble.bubble_mode=self.settings['bubble_mode']
+        if 'bubble_mode' in values and self.bubble._editor_origin is not None:
+            self.bubble._editor_origin.update(bubble_mode=self.settings['bubble_mode'],expanded=False,auto_compact=False)
         self.bubble.token_range=self.settings['token_chart_range']
         self.bubble.pinned=self.settings['on_top'];self.bubble.wandering=self.settings['wandering'];self.bubble.movement_locked=self.settings['no_move']
         size=round(256*self.settings['scale']);self.setFixedSize(size,size)
@@ -373,8 +490,10 @@ class DesktopPet(EnhancedPet):
             if visible:widget.show()
         self.sync_panel_flags()
         self.bubble.redraw();self.position_bubble()
+        if self._visibility_ready:self.apply_surface_visibility()
         if self.video_yield:self.video_yield.reconcile()
         self.next_chain=time.monotonic()+self.settings['random_interval'];self.next_talk=time.monotonic()+self.settings['talk_min']
+        self.schedule_animation()
         if save:
             try:self.save_settings()
             except (OSError,ValueError):
@@ -395,8 +514,22 @@ class DesktopPet(EnhancedPet):
             frame=self.player.resize(self.frame_size)
             if frame is not None:
                 self.frames=[frame];self.index=0;self._hit_image=frame.toImage();self.update_frame()
+                if self.sustained.active:self.sustained.prewarm(self.player,self.frame_size)
+
+    def pause_hidden_animation(self):
+        if not self.isVisible() and self.player:
+            self.sustained.cancel();self.player.close();self.continuous.clear();self.gate.state='idle';self._resume_idle=True
 
     def event(self,event):
+        if getattr(self,'enhanced_ready',False):
+            if event.type()==QEvent.Type.UngrabMouse:
+                # Qt can release its implicit grab just before delivering mouseRelease.
+                epoch=self._pointer_epoch
+                QTimer.singleShot(0,self,lambda:self.cancel_lost_grab(epoch))
+            elif event.type()==QEvent.Type.Hide:
+                self.cancel_pointer();QTimer.singleShot(0,self,self.pause_hidden_animation)
+            elif event.type()==QEvent.Type.Show and self._resume_idle:
+                self._resume_idle=False;self.idle()
         result=super().event(event)
         if event.type()==QEvent.Type.DevicePixelRatioChange and getattr(self,'enhanced_ready',False):
             QTimer.singleShot(0,self.sync_decode_size)
@@ -421,18 +554,53 @@ class DesktopPet(EnhancedPet):
         screen=QApplication.screenAt(QCursor.pos()) or QApplication.primaryScreen();a=screen.availableGeometry()
         self.move(clamp_position(QPoint(a.right()-self.width()-20,a.bottom()-self.height()-20),self.size(),a));self.position_bubble();self.save_settings()
     def recover(self):
-        self.apply_settings({'mouse_through':False});self.show();self.bubble.redraw();self.position_bubble()
+        self._desktop_hidden=False;values={'mouse_through':False}
+        if not self.settings.get('character_visible',True):values['bubble']=True
+        self.apply_settings(values);self.apply_surface_visibility();self.bubble.redraw();self.position_bubble()
     def toggle_pet(self):
-        if self.isVisible():self.stop_walk();self.hide();self.bubble.hide()
-        else:self.show();self.bubble.redraw();self.position_bubble()
+        self._desktop_hidden=not self._desktop_hidden;self.apply_surface_visibility()
+    def card_surface_visible(self):
+        return not self._desktop_hidden and (self.isVisible() or not self.settings.get('character_visible',True))
+    def apply_surface_visibility(self):
+        if not self._visibility_ready:return
+        character=self.settings.get('character_visible',True) and not self._desktop_hidden
+        if character:
+            if not self.isVisible():self.show();self.tick.start()
+        else:
+            self.stop_walk();self.throwing=False;self.cancel_pointer();self.hide();self.tick.stop();self.pause_hidden_animation()
+            if self._pending_material:self.apply_material()
+        if not self._desktop_hidden and (self.bubble.enabled or self.bubble.panel_page!='status'):
+            self.bubble.show();self.position_bubble()
+        elif self._desktop_hidden:self.bubble.hide()
+    def remember_card_anchor(self,rect):
+        screen=QApplication.screenAt(rect.center()) or QApplication.primaryScreen();a=screen.availableGeometry()
+        self._card_anchor=dict(screen=screen.name(),rx=(rect.center().x()-a.left())/max(1,a.width()),bottom=(rect.bottom()+1-a.top())/max(1,a.height()))
+        self.settings['card_anchor']=dict(self._card_anchor)
+    def card_geometry(self,size):
+        anchor=self._card_anchor
+        if not isinstance(anchor,dict):
+            rect=QRect(self.bubble.pos(),size);self.remember_card_anchor(rect);anchor=self._card_anchor
+        screen=next((s for s in QApplication.screens() if s.name()==anchor.get('screen')),QApplication.primaryScreen());a=screen.availableGeometry()
+        try:cx=a.left()+a.width()*max(0,min(1,float(anchor.get('rx',.8))));bottom=a.top()+a.height()*max(0,min(1,float(anchor.get('bottom',.8))))
+        except (TypeError,ValueError):cx=a.right()-80;bottom=a.bottom()-40
+        x=round(cx-size.width()/2);y=round(bottom-size.height())
+        reserve=self.bubble.report.reserved_height()+6 if self.bubble.report and self.bubble.report.requested else 0
+        x=max(a.left(),min(x,a.right()-size.width()+1));y=max(a.top()+min(reserve,max(0,a.height()-size.height())),min(y,a.bottom()-size.height()+1))
+        return QRect(x,y,size.width(),size.height())
+    def move_card(self,point):
+        rect=QRect(point,self.bubble.size());self.remember_card_anchor(rect);self.bubble.move(self.card_geometry(rect.size()).topLeft());self.remember_card_anchor(self.bubble.geometry())
     def position_bubble(self):
         if self.enhanced_ready and (self.bubble.size_transition.running or self.bubble.size_transition.preparing or self.bubble.size_transition.landing.image is not None):return
+        if self.enhanced_ready and not self.settings.get('character_visible',True):
+            self.bubble.move(self.card_geometry(self.bubble.content.size()).topLeft())
+            if self._desktop_hidden:self.bubble.hide()
+            return
         if self.enhanced_ready and self.bubble.panel_page!='status' and self.bubble._editor_positioned:
-            if not self.isVisible():self.bubble.hide()
+            if not self.card_surface_visible():self.bubble.hide()
             return
         super().position_bubble()
         if self.enhanced_ready and self.bubble.panel_page!='status':self.bubble._editor_positioned=True
-        if self.enhanced_ready and not self.isVisible():self.bubble.hide()
+        if self.enhanced_ready and not self.card_surface_visible():self.bubble.hide()
     def can_raise_bubble(self):
         if self._video_yielded:return False
         # Owned panels stay above the pet. Periodic bubble updates must not
@@ -453,7 +621,7 @@ class DesktopPet(EnhancedPet):
                     if active:panel.raise_();panel.activateWindow()
     def show_panel(self,panel):
         if not panel.isWindow():
-            self.stop_walk();self.throwing=False;self.show()
+            self.stop_walk();self.throwing=False;self._desktop_hidden=False;self.apply_surface_visibility()
             self.bubble.show_page('settings' if panel is self.settings_dialog else 'chat',panel)
             self.bubble.raise_();self.bubble.activateWindow()
             if self.bubble.windowHandle():self.bubble.windowHandle().requestActivate()
@@ -483,7 +651,8 @@ class DesktopPet(EnhancedPet):
             '落地':[self.manifest['landingAnimation']] if self.manifest.get('landingAnimation') else []}
     def populate_tray(self):self.build_menu(self.tray_menu,tray=True)
     def execute_command(self,command,checked=False):
-        toggles={'pin':'on_top','lock':'no_move','through':'mouse_through','bubble':'bubble'}
+        if command.startswith('mode_'):self.bubble.set_mode(command[5:]);return
+        toggles={'character':'character_visible','pin':'on_top','lock':'no_move','through':'mouse_through','bubble':'bubble'}
         if command in toggles:self.set_option(toggles[command],checked);return
         commands={'status':self.open_status,'settings':self.open_settings,'chat':self.open_chat,
             'visible':self.toggle_pet,'recover':self.recover,'position':self.reset_position,
@@ -491,13 +660,15 @@ class DesktopPet(EnhancedPet):
         commands[command]()
     def menu_command(self,menu,command):
         labels={'status':'查看状态','settings':'桌宠设置…','chat':'和白龙聊天…',
-            'visible':'隐藏桌宠' if self.isVisible() else '显示桌宠','recover':'找回桌宠并关闭穿透',
+            'visible':'显示桌面组件' if self._desktop_hidden else '隐藏全部组件','recover':'找回组件并关闭穿透','character':'显示人物',
+            'mode_auto':'自动 / 正常卡片','mode_mini':'胶囊模式','mode_minimal':'极简：额度百分比',
             'position':'回到当前屏幕右下角','pin':'始终置顶','lock':'锁定人物位置（含拖动）',
             'through':'鼠标穿透（从托盘恢复）','bubble':'显示气泡','quit':'退出桌宠',
             'walk':('自主走动（位置已锁定）' if self.settings['no_move'] else '暂停自主走动' if self.settings['wandering'] else '恢复自主走动')}
         action=menu.addAction(labels[command]);action.setObjectName('command_'+command)
-        key={'pin':'on_top','lock':'no_move','through':'mouse_through','bubble':'bubble'}.get(command)
+        key={'character':'character_visible','pin':'on_top','lock':'no_move','through':'mouse_through','bubble':'bubble'}.get(command)
         if key:action.setCheckable(True);action.setChecked(self.settings[key])
+        if command.startswith('mode_'):action.setCheckable(True);action.setChecked(self.bubble.bubble_mode==command[5:])
         if command=='walk':action.setEnabled(not self.settings['no_move'])
         action.triggered.connect(lambda value=False,c=command:QTimer.singleShot(0,self,lambda:self.execute_command(c,value)))
         return action
@@ -505,10 +676,14 @@ class DesktopPet(EnhancedPet):
         menu.clear()
         if tray:
             for command in ('recover','visible','status','settings'):self.menu_command(menu,command)
+            display=menu.addMenu('显示方式');self.menu_command(display,'character')
+            for mode in ('auto','mini','minimal'):self.menu_command(display,'mode_'+mode)
             menu.addSeparator();self.menu_command(menu,'quit');return
         for command in ('status','chat','walk'):self.menu_command(menu,command)
         desktop=menu.addMenu('桌面操作')
-        for command in ('pin','lock','through','bubble'):self.menu_command(desktop,command)
+        for command in ('character','pin','lock','through','bubble'):self.menu_command(desktop,command)
+        display=desktop.addMenu('卡片模式')
+        for mode in ('auto','mini','minimal'):self.menu_command(display,'mode_'+mode)
         desktop.addSeparator()
         for command in ('recover','position'):self.menu_command(desktop,command)
         groups=menu.addMenu('手动动作')
@@ -567,6 +742,13 @@ class DesktopPet(EnhancedPet):
         try:
             release=self.updates.release
             if release is None:raise OSError('更新信息已失效，请重新检查')
+            if release.kind=='program':
+                from program_updates import program_paths,verify_ready
+                expected=program_paths(self.updates.cache,release.version)['source']
+                if Path(path).resolve()!=expected.resolve():raise OSError('程序更新尚未就绪，请重新下载')
+                exe=verify_ready(expected,self.updates.cache,release.version,release.sha256,full=False)
+                subprocess.Popen([str(exe),'--apply-program-update'],cwd=str(expected),creationflags=0x08000000 if sys.platform=='win32' else 0)
+                self.updates.installing();return
             expected=cache_paths(self.updates.cache,release.version)['installer']
             if Path(path).resolve()!=expected.resolve() or not expected.is_file():raise OSError('安装程序尚未就绪，请重新下载')
             subprocess.Popen([str(expected),'--quick'],cwd=str(expected.parent),creationflags=0x08000000 if sys.platform=='win32' else 0)
@@ -582,20 +764,22 @@ class DesktopPet(EnhancedPet):
         return choices
     def switch_character(self,key):
         if not key:return
-        if key=='builtin':root=ASSETS
+        if self._pending_material:raise ValueError('画质切换正在等待动作结束，请稍后切换角色')
+        if key=='builtin':root=self.material_store.root
         else:
             root=(self.character_dir/key).resolve()
             if root.parent!=self.character_dir.resolve():raise ValueError('角色目录无效')
         # Import performs full decoding. Switching checks structure and first frame only.
         m=json.loads((root/'素材清单.json').read_text(encoding='utf-8'))
         if not isinstance(m,dict) or not isinstance(m.get('idle'),dict) or not isinstance(m.get('variants',[]),list):raise ValueError('角色清单结构无效')
-        for item in all_items(m):
+        for item in all_items(m)+seam_items(m):
             path=(root/(item.get('playbackFile') or item['file'])).resolve()
             if not path.is_relative_to(root.resolve()) or not path.is_file():raise ValueError('角色包缺少素材或路径无效')
         old=(self.asset_root,self.manifest,self.idles,self.variants,self.settings.get('character','builtin'))
         preference_keys=('scale','playback_speed','talk_lines')
         self.settings['character_preferences'][old[4]]={k:copy.deepcopy(self.settings[k]) for k in preference_keys}
         self.stop_walk();self.throwing=False;self.gate.state='idle'
+        self.sustained.cancel();self.continuous.clear()
         try:
             self.asset_root=root;self.manifest=m;self.idles=[m['idle']]+m.get('additionalIdleAnimations',[]);self.variants=m.get('variants',[])
             self.reactions.set_actions(item['id'] for item in all_items(m))
@@ -606,9 +790,36 @@ class DesktopPet(EnhancedPet):
             self.gate.state='idle';self.idle();raise
         self.settings['character']=key
         self.apply_settings(self.settings['character_preferences'].get(key,{}))
-        self.codex_navigation.close()
         if self.bubble.report:self.bubble.report.animation.stop();self.bubble.report.hide()
         if self.chat_window:self.chat_window.shutdown();self.chat_window.deleteLater();self.chat_window=None
+
+    def queue_material(self,tier,root):
+        if self.settings.get('character','builtin')!='builtin':
+            self.materials.failed('请先切回内置白龙，再切换内置素材画质');return
+        self._pending_material=(tier,Path(root))
+        if self._desktop_hidden or not self.settings.get('character_visible',True):self.apply_material()
+
+    def apply_material(self):
+        if not self._pending_material:return False
+        tier,root=self._pending_material;self._pending_material=None
+        old=(self.asset_root,self.manifest,self.idles,self.variants)
+        try:
+            m=json.loads((root/'素材清单.json').read_text(encoding='utf-8'))
+            # Fully verified in the worker. Probe the entry frame before committing preference.
+            from PIL import Image
+            with Image.open(root/(m['idle'].get('playbackFile') or m['idle']['file'])) as im:im.load()
+            self.material_store.activate(tier,root)
+            self.sustained.cancel()
+            if self.player:self.player.close()
+            self.player=StreamPlayer();self.player.ended=True
+            self.cache.clear();self.pinned_frames.clear()
+            self.asset_root=root;self.manifest=m;self.idles=[m['idle']]+m.get('additionalIdleAnimations',[]);self.variants=m.get('variants',[])
+            self.current=m['idle'];self.gate.state='idle'
+            self.reactions.set_actions(item['id'] for item in all_items(m))
+            self.materials.applied();return True
+        except (OSError,ValueError,KeyError) as error:
+            self.asset_root,self.manifest,self.idles,self.variants=old
+            self.materials.failed('画质切换失败：'+str(error));return False
     def export_diagnostics(self):
         self.record_state();path=ROOT/('白龙诊断-'+time.strftime('%Y%m%d-%H%M%S')+'.json')
         value=json.loads((STATE_DIR/'runtime.json').read_text(encoding='utf-8'))
@@ -627,7 +838,21 @@ class DesktopPet(EnhancedPet):
         except (OSError,ValueError) as error:QMessageBox.warning(self.settings_dialog,'恢复失败',str(error))
     def record_state(self):
         path=STATE_DIR/'runtime.json';value=super().runtime_state()
-        value.update(asset_count=len(all_items(self.manifest)),work_animation_count=len([v for v in self.manifest.get('workAnimations',[]) if v]),
+        from decode_runtime import STATS
+        value.update(shared_body_tail_decode=True,nonblocking_decoder_cancel=True,adaptive_animation_clock=True,high_resolution_frame_clock=True,frame_clock_resolution=time.get_clock_info('perf_counter').resolution,idle_movement_timer_ms=1000,
+            decode_runtime=STATS.snapshot(),animation_wakeups=self.animation_wakeups,movement_wakeups=self.movement_wakeups,decode_error=self.decode_error)
+        value.update(material_tiers=True,material_default='light',material_current=self.material_store.current,
+            program_only_updates=True,program_update_material_verification=True,program_update_full_fallback=True,
+            material_resolution=720 if self.material_store.current=='hd' else 512,material_hd_cached=self.material_store.available('hd'),
+            material_content_id=self.material_store.catalog['tiers'][self.material_store.current]['id'] if self.material_store.catalog else None,
+            material_switch_pending=bool(self._pending_material))
+        value.update(native_client_hit_testing=True,shared_paint_hit_transform=True,lost_mouse_grab_recovery=True,character_switch_keeps_navigation=True,
+            independent_card_surface=True,character_visible=self.settings['character_visible'],minimal_quota_mode=True,hidden_character_decoder_paused=not self.settings['character_visible'] and not self.tick.isActive(),
+            isolated_transition_preparation=True,cleared_native_landing=True,linked_report_motion=True,
+            continuous_state_playback=True,sustained_animation_phase=self.sustained.phase,sustained_animation_cycles=self.sustained.cycles,
+            natural_sustained_variants=True,isolated_report_presentation=True,sustained_animation_variant=self.sustained.variant_index,
+            sustained_supported_actions=[i['id'] for i in self.manifest.get('workAnimations',[]) if i.get('sustained')],status_stability_seconds=self.continuous.stable_seconds,
+            asset_count=len(all_items(self.manifest)),work_animation_count=len([v for v in self.manifest.get('workAnimations',[]) if v]),
             semantic_work_actions=True,explicit_task_arrival_animation=True,current_animation=self.current.get('id') if self.current else None,
             sustained_work_response=True,status_action_interval=self.reactions.interval,animation_lifecycle_leases=len(self.reactions.leases),
             smoothed_token_curves=True,conversation_hover_contrast=True,asynchronous_codex_navigation=True,
@@ -641,7 +866,7 @@ class DesktopPet(EnhancedPet):
         from typography import LATIN_FAMILY,register_font
         report=self.bubble.report
         report_data=snapshot.get('report') or {}
-        value.update(ui_revision=62,hourly_token_entry='today_tokens',unified_refresh=True,icon_only_header_actions=True,refresh_icon_style='single_arc',icon_motion_speed=1.2,busy_icon_style='orbit_rings',status_icon_morph=True,status_waiting_live_flags=True,island_quota_segmented=False,island_quota_style='open_arc',island_quota_numeric_only=True,native_shrink_landing=True,shrink_preserves_chart_progress=True,native_landing_hold_ms=34,cached_chart_layers=True,stable_report_scrollbar=True,animated_deck_tabs=True,incremental_deck_switch=True,prewarmed_transition_landing=True,monotone_container_motion=True,status_updates_preserve_surface=True,capsule_pixel_handoff=True,atomic_transition_handoff=True,clean_report_dismiss=True,stable_disclosure_gutter=True,unified_card_motion=True,report_continuous_shape=True,animated_disclosures=True,week_quota_palette=True,continuous_surface_morph=True,shared_status_glyph=True,apple_island_reference=True,panel_shrink_spring=True,panel_dismiss_spring=True,panel_shrink_ms=440,panel_dismiss_ms=360,lossless_asset_pack=True,lightweight_maintenance=True,optional_webm_converter=True,shared_version_assets=True,fair_activity_targets=True,persistent_completion_ledger=True,cached_log_discovery=True,chat_incremental_stream=True,installation_ready_receipt=True,semantic_controls=True,labeled_header_actions=False,editor_keyboard_save=True,capability_health=True,connection_path_picker=True,report_scope_groups=True,report_model_filter_explicit=True,settings_draft_merge=True,settings_dirty_fields_only=True,context_menu_root_items=8,tray_recovery_menu=True,editor_returns_to_origin=True,chat_destructive_confirmation=True,quota_query_silent=True,subagent_completion_filter=True,ring_persistent_legend=False,quota_display_layout='labeled_bars',quota_reset_per_window=True,today_tokens_direct_value=True,book_reference_count=27,island_click_opens_normal=True,conversation_name_pointer_feedback=True,context_compaction_tracking=True,conversation_name_navigation=True,codex_live_status_connected=bool(self.activity and self.activity.live_reader and self.activity.live_reader.connected),daily_report_incremental_updates=True,daily_report_chart_start_after_show=True,quota_source_header_visible=False,incremental_status_refresh=True,skip_unchanged_log_reads=True,single_runtime_write=True,read_acknowledgement_history=True,read_acknowledgement_settle_seconds=4,conversation_names_visible=True,completed_conversation_background=True,independent_conversation_scroll=True,operation_status_summary=True,session_read_tracking=True,conversation_status_limit=2,codex_connection_diagnostics=True,portable_codex_discovery=True,island_bubble=True,island_quota_priority=True,bubble_mode=self.bubble.bubble_mode,bubble_auto_compact=self.bubble.auto_compact,island_visible=self.bubble.is_island(),panel_transition_stable_canvas=True,panel_transition_content_blend=True,chart_entry_animation=True,daily_report=True,daily_report_stable_surface=True,token_scan_background=True,token_models=len({r['model'] for r in report_data.get('daily_models',[])}),token_report_hours=len(report_data.get('hours',[])),daily_report_visible=bool(report and report.isVisible()),daily_report_aligned=not report or not report.isVisible() or (report.content_geometry().width()==self.bubble.width() and report.content_geometry().x()==self.bubble.x() and report.content_geometry().bottom()+1==self.bubble.y()-6),ring_center_y=None,daily_report_open=bool(self.bubble.report and self.bubble.report.requested),inline_explanations_only=True,version=VERSION,status_icon_animated=True,status_icon_unread=len(self.bubble.status_indicator.unread),status_icon_acknowledgement=True,status_icon_state=self.bubble.status_indicator.visual(),status_icon_timer=self.bubble.status_indicator.timer.isActive(),panel_transition_no_fade=True,panel_transition_staged_layout=True,panel_transition_ms=480,idle_cache_mb=round(idle_cache['bytes']/1048576,2),idle_cache_limit_mb=idle_cache['limit']/1048576,idle_cache_hits=idle_cache['hits'],integrated_panels=True,panel_page=self.bubble.panel_page,separate_panel_windows=sum(bool(p and p.isWindow()) for p in (self.settings_dialog,self.chat_window)),expanded_details_grouped=True,latin_font=LATIN_FAMILY,latin_font_loaded=register_font(),status_height_transition_ms=300,status_transition_synchronized=True,token_chart_range=self.bubble.token_range,
+        value.update(ui_revision=69,hourly_token_entry='today_tokens',unified_refresh=True,icon_only_header_actions=True,refresh_icon_style='single_arc',icon_motion_speed=1.2,busy_icon_style='orbit_rings',status_icon_morph=True,status_waiting_live_flags=True,island_quota_segmented=False,island_quota_style='open_arc',island_quota_numeric_only=True,native_shrink_landing=True,shrink_preserves_chart_progress=True,native_landing_hold_ms=34,cached_chart_layers=True,stable_report_scrollbar=True,animated_deck_tabs=True,incremental_deck_switch=True,prewarmed_transition_landing=True,monotone_container_motion=True,status_updates_preserve_surface=True,capsule_pixel_handoff=True,atomic_transition_handoff=True,clean_report_dismiss=True,stable_disclosure_gutter=True,unified_card_motion=True,report_continuous_shape=True,animated_disclosures=True,week_quota_palette=True,continuous_surface_morph=True,shared_status_glyph=True,apple_island_reference=True,panel_shrink_spring=True,panel_dismiss_spring=True,panel_shrink_ms=440,panel_dismiss_ms=360,lossless_asset_pack=self.material_store.current=='hd',lossless_asset_encoding=True,lightweight_resampling=self.material_store.current=='light',lightweight_maintenance=True,optional_webm_converter=True,shared_version_assets=True,fair_activity_targets=True,persistent_completion_ledger=True,cached_log_discovery=True,chat_incremental_stream=True,installation_ready_receipt=True,semantic_controls=True,labeled_header_actions=False,editor_keyboard_save=True,capability_health=True,connection_path_picker=True,report_scope_groups=True,report_model_filter_explicit=True,settings_draft_merge=True,settings_dirty_fields_only=True,context_menu_root_items=8,tray_recovery_menu=True,editor_returns_to_origin=True,chat_destructive_confirmation=True,quota_query_silent=True,subagent_completion_filter=True,ring_persistent_legend=False,quota_display_layout='labeled_bars',quota_reset_per_window=True,today_tokens_direct_value=True,book_reference_count=27,island_click_opens_normal=True,conversation_name_pointer_feedback=True,context_compaction_tracking=True,conversation_name_navigation=True,codex_live_status_connected=bool(self.activity and self.activity.live_reader and self.activity.live_reader.connected),daily_report_incremental_updates=True,daily_report_chart_start_after_show=True,quota_source_header_visible=False,incremental_status_refresh=True,skip_unchanged_log_reads=True,single_runtime_write=True,read_acknowledgement_history=True,read_acknowledgement_settle_seconds=4,conversation_names_visible=True,completed_conversation_background=True,independent_conversation_scroll=True,operation_status_summary=True,session_read_tracking=True,conversation_status_limit=2,codex_connection_diagnostics=True,portable_codex_discovery=True,island_bubble=True,island_quota_priority=True,bubble_mode=self.bubble.bubble_mode,bubble_auto_compact=self.bubble.auto_compact,island_visible=self.bubble.is_island(),panel_transition_stable_canvas=True,panel_transition_content_blend=True,chart_entry_animation=True,daily_report=True,daily_report_stable_surface=True,token_scan_background=True,token_models=len({r['model'] for r in report_data.get('daily_models',[])}),token_report_hours=len(report_data.get('hours',[])),daily_report_visible=bool(report and report.isVisible()),daily_report_aligned=not report or not report.isVisible() or (report.content_geometry().width()==self.bubble.width() and report.content_geometry().x()==self.bubble.x() and report.content_geometry().bottom()+1==self.bubble.y()-6),ring_center_y=None,daily_report_open=bool(self.bubble.report and self.bubble.report.requested),inline_explanations_only=True,version=VERSION,status_icon_animated=True,status_icon_unread=len(self.bubble.status_indicator.unread),status_icon_acknowledgement=True,status_icon_state=self.bubble.status_indicator.visual(),status_icon_timer=self.bubble.status_indicator.timer.isActive(),panel_transition_no_fade=True,panel_transition_staged_layout=True,panel_transition_ms=480,idle_cache_mb=round(idle_cache['bytes']/1048576,2),idle_cache_limit_mb=idle_cache['limit']/1048576,idle_cache_hits=idle_cache['hits'],integrated_panels=True,panel_page=self.bubble.panel_page,separate_panel_windows=sum(bool(p and p.isWindow()) for p in (self.settings_dialog,self.chat_window)),expanded_details_grouped=True,latin_font=LATIN_FAMILY,latin_font_loaded=register_font(),status_height_transition_ms=300,status_transition_synchronized=True,token_chart_range=self.bubble.token_range,
             token_history_days=len(snapshot.get('history_days',{})),token_hour_slots=len(snapshot.get('hours',[])),
             mode=self.mode,action_state=self.gate.state,mouse_through=self.settings['mouse_through'],scale=self.settings['scale'],
             facing=self.walk_direction,decoder_queue=self.player.frames.qsize() if self.player else 0,first_frame_cache=len(self.player.first) if self.player else 0,
@@ -670,6 +895,9 @@ class DesktopPet(EnhancedPet):
         if self.settings_dialog and self.settings_dialog.isVisible():self.connectionHealthChanged.emit(value['connection_health'])
         atomic_json(path,value)
     def closeEvent(self,event):
+        if hasattr(self,'materials') and not self.materials.shutdown():
+            if not self._material_exit_pending:self._material_exit_pending=True;self.materials.idle.connect(self.close)
+            event.ignore();return
         if self.settings_dialog and self.settings_dialog.path_job and self.settings_dialog.path_job.isRunning():
             if not self.settings_dialog.path_job.wait(6500):event.ignore();return
         if self.settings_dialog and self.settings_dialog.connection_job and self.settings_dialog.connection_job.isRunning():
@@ -680,6 +908,7 @@ class DesktopPet(EnhancedPet):
         if hasattr(self,'updates') and not self.updates.shutdown():
             if not self._update_exit_pending:self._update_exit_pending=True;self.updates.idle.connect(self.close)
             event.ignore();return
+        self.cancel_pointer();self.sustained.cancel();self.codex_navigation.close()
         if self.bubble.report:self.bubble.report.animation.stop();self.bubble.report.hide()
         if self.chat_window:self.chat_window.shutdown()
         if self.settings_dialog:self.settings_dialog.hide()

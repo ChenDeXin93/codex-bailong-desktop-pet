@@ -263,7 +263,7 @@ class EnhancedPet(Pet):
         self.quota_timer.timeout.connect(self.refresh_quota)
         self.quota_timer.start()
         self.diagnostic_timer=QTimer(self)
-        self.diagnostic_timer.setInterval(2000)
+        self.diagnostic_timer.setInterval(10000)
         self.diagnostic_timer.timeout.connect(self.record_state)
         self.diagnostic_timer.start()
         self.tray=QSystemTrayIcon(QIcon(self.frames[0]),self)
@@ -733,6 +733,21 @@ class EnhancedPet(Pet):
 
 
 def main():
+    if '--apply-program-update' in sys.argv:
+        from program_update_apply import main as apply_program
+        return apply_program()
+    if '--material-probe' in sys.argv:
+        from material_probe import run
+        return run(sys.argv[sys.argv.index('--material-probe')+1])
+    if '--card-surface-probe' in sys.argv:
+        from card_surface_probe import run
+        return run(sys.argv[sys.argv.index('--card-surface-probe')+1])
+    if '--sustained-probe' in sys.argv:
+        from sustained_probe import run
+        return run(sys.argv[sys.argv.index('--sustained-probe')+1])
+    if '--interaction-probe' in sys.argv:
+        from interaction_probe import run
+        return run(sys.argv[sys.argv.index('--interaction-probe')+1])
     if '--smoke-video-probe' in sys.argv:
         from video_yield import smoke_probe
         return smoke_probe(sys.argv[sys.argv.index('--smoke-video-probe')+1])
@@ -751,15 +766,17 @@ def main():
     from typography import install_ui_font
     install_ui_font(app)
     app.setQuitOnLastWindowClosed(False)
+    server_name='bailong-enhanced-local-v1'
+    if '--smoke-test' in sys.argv:server_name+='-smoke-'+str(os.getpid())
     socket=QLocalSocket()
-    socket.connectToServer('bailong-enhanced-local-v1')
+    socket.connectToServer(server_name)
     if socket.waitForConnected(300):
         socket.write(b'quit' if '--quit' in sys.argv else b'settings' if '--settings' in sys.argv else b'show')
         socket.flush();socket.waitForBytesWritten(300);return 0
     if '--quit' in sys.argv:return 0
-    QLocalServer.removeServer('bailong-enhanced-local-v1')
+    QLocalServer.removeServer(server_name)
     server=QLocalServer()
-    if not server.listen('bailong-enhanced-local-v1'):return 1
+    if not server.listen(server_name):return 1
     from desktop import DesktopPet
     pet=DesktopPet(monitor=not any(arg in sys.argv for arg in ('--preview','--smoke-test')))
     connections=[]
@@ -776,8 +793,9 @@ def main():
         if peer.bytesAvailable():receive()
         peer.disconnected.connect(peer.deleteLater)
     server.newConnection.connect(incoming)
-    pet.show()
-    if sys.platform=='win32':ctypes.windll.user32.ShowWindow(int(pet.winId()),4)
+    if hasattr(pet,'apply_surface_visibility'):pet.apply_surface_visibility()
+    else:pet.show()
+    if sys.platform=='win32' and pet.isVisible():ctypes.windll.user32.ShowWindow(int(pet.winId()),4)
     pet.bubble.redraw()
     pet.position_bubble()
     from deployment_state import write_ready_receipt

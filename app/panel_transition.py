@@ -39,7 +39,7 @@ class NativeLanding(QWidget):
         if bool(self.windowFlags()&Qt.WindowType.WindowStaysOnTopHint)!=top:self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint,top)
         # Expose an empty, input-transparent surface during the animation.
         # A first show at the final resize may not be paintable synchronously.
-        self.setGeometry(rect);self.show();self.raise_()
+        self.setGeometry(rect);self.show();self.repaint();self.raise_()
     def present(self,image,rect):
         self.prepare(rect);self.image=image;self.paints=0;self.repaint()
     def paintEvent(self,event):
@@ -47,7 +47,12 @@ class NativeLanding(QWidget):
         if self.image is not None:p.drawPixmap(0,0,self.image)
         if self.image is not None:self.paints+=1
     def release(self):
-        self.hide();self.image=None
+        # A hidden layered backing store keeps its last pixels. Erase while
+        # exposed, before hiding, so the next transparent prewarm cannot flash
+        # the previous capsule's final frame on its first native show.
+        self.image=None
+        if self.isVisible():self.repaint()
+        self.hide()
 
 
 class PanelTransition(QObject):
@@ -86,13 +91,18 @@ class PanelTransition(QObject):
         b.setUpdatesEnabled(False)
         if self.before is not None:
             self.cover.image=self.before;self.cover.setGeometry(b.rect());self.cover.show();self.cover.raise_()
+        # All target widgets are built under a hidden ancestor. Offscreen
+        # render may flush native updates even without an event-loop turn.
+        b.content.hide()
+        if b.report and b.report.requested and not b.report._animating:b.report.follow.begin()
     def commit(self):
         # Redrawing a disabled status view may already have started its close.
         # Do not overwrite that target with a second navigation animation.
         if self.closing:return
         b=self.bubble;target=b.content_geometry()
         if self.start_rect is None or target==self.start_rect:
-            b.setFixedSize(target.size());b.move(target.topLeft());self.cover.hide()
+            b.setFixedSize(target.size());b.move(target.topLeft());b.content.setVisible(b.isVisible());self.cover.hide()
+            if b.report:b.report.follow.finish(target)
             self.before=None;self.start_rect=None;self.old_surface=None;self.deferred=False;self.preparing=False;self._end_preparation();self._hold_icon(False);return
         self.target_rect=target;b.layout.activate()
         self.shrinking=target.width()*target.height()<self.start_rect.width()*self.start_rect.height()
@@ -110,7 +120,7 @@ class PanelTransition(QObject):
         b.setUpdatesEnabled(bool(self._preparation_updates))
         for widget in widgets:
             if widget.layout():widget.layout().activate()
-            if not self.shrinking and widget.isVisible() and hasattr(widget,'begin_reveal'):widget.begin_reveal()
+            if not self.shrinking and widget.isVisibleTo(b.content) and hasattr(widget,'begin_reveal'):widget.begin_reveal()
         ratio=b.devicePixelRatioF();size=b.content.size()
         image=QPixmap(pixel_size(size.width(),ratio),pixel_size(size.height(),ratio));image.setDevicePixelRatio(ratio);image.fill(Qt.GlobalColor.transparent if b.is_island() else QColor('#fcfafc'))
         b.content.render(image,QPoint(),QRegion(),QWidget.RenderFlag.DrawChildren)
@@ -126,6 +136,7 @@ class PanelTransition(QObject):
         # snapshots and the bottom-anchored clip change on each frame.
         self.progress=0.;self.raw_progress=0.;self.canvas_rect=self.start_rect.united(target).united(self.morph.bounds())
         self.morph.prepare_landing(self.canvas_rect,ratio)
+        if b.report:b.report.follow.commit(target)
         if self.shrinking:self.landing.prepare(target)
         enabled=b.updatesEnabled();b.setUpdatesEnabled(False)
         try:
@@ -155,6 +166,7 @@ class PanelTransition(QObject):
         self.raw_progress=float(value)
         self.progress=max(0.,dismiss_progress(value)) if self.closing else container_progress(value)
         self.cover.repaint()
+        if self.bubble.report:self.bubble.report.follow.advance(self.raw_progress)
     def visible_geometry(self):
         if not self.running or self.target_rect is None:return QRect(self.bubble.geometry())
         if self.morph and not self.closing:return self.morph.geometry(self.raw_progress).toAlignedRect()
@@ -207,6 +219,7 @@ class PanelTransition(QObject):
             b.content.setVisible(not closing and b.isVisible());b.layout.activate();self.cover.hide();self.cover.image=None
         finally:b.setUpdatesEnabled(enabled)
         b.repaint()
+        if b.report:b.report.follow.finish(self.target_rect)
         self.active=False;self.before=None;self.old_surface=None;self.morph=None;self.start_rect=self.target_rect=None
         if guarded:self.landing_timer.start()
         else:self._hold_icon(False);self.start_reveals()
@@ -236,10 +249,12 @@ class PanelTransition(QObject):
             enabled=self._preparation_updates;self._preparation_updates=None
             self.bubble.setUpdatesEnabled(enabled)
     def cancel(self):
+        if self.bubble.report:self.bubble.report.follow.cancel()
         self.landing_timer.stop();self.landing.release()
         self.animation.stop();self.deferred=False;self.status_deferred=False;self.preparing=False
         if self.active:self.finish()
         else:
             self.cover.hide();self.cover.image=None;self.before=None;self.old_surface=None
+            if self.bubble.isVisible():self.bubble.content.show()
         self._end_preparation()
         if self.landing.image is None:self._hold_icon(False)

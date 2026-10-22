@@ -40,7 +40,7 @@ class VideoYield(QObject):
         self.reconcile()
     def owned(self,widget):
         while widget is not None:
-            if widget is self.pet:return True
+            if widget is self.pet or widget is getattr(self.pet,'bubble',None):return True
             widget=widget.parentWidget()
         return False
     def windows(self):

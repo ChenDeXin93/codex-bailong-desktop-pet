@@ -61,9 +61,13 @@ class StatusIsland(QWidget):
         else:text=metrics.elidedText(text,Qt.TextElideMode.ElideRight,budget)
         self.text.setText(text);self.setAccessibleName('Codex · '+full+'；点击打开正常面板')
     def mouseReleaseEvent(self,event):
+        window=self.window()
+        if hasattr(window,'card_pointer_release') and window.card_pointer_release():event.accept();return
         if event.button()==Qt.MouseButton.LeftButton:self.expand.emit();event.accept()
     def paintEvent(self,event):
-        p=QPainter(self);p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p=QPainter(self);self.paint_dial(p)
+    def paint_dial(self,p):
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
         p.setPen(QPen(QColor('#494052'),1));p.setBrush(QColor(ISLAND));p.drawRoundedRect(QRectF(self.rect()).adjusted(.5,.5,-.5,-.5),22,22)
 
 class QuotaSatellite(QToolButton):
@@ -116,8 +120,9 @@ class QuotaSatellite(QToolButton):
         self._track_pen=QPen(QColor(TRACK),4.6,Qt.PenStyle.SolidLine,Qt.PenCapStyle.RoundCap)
         self._value_pen=QPen(self._color,4.6,Qt.PenStyle.SolidLine,Qt.PenCapStyle.RoundCap)
     def paintEvent(self,event):
-        p=QPainter(self);p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.setPen(Qt.PenStyle.NoPen)
+        p=QPainter(self);self.paint_dial(p)
+    def paint_dial(self,p):
+        p.setRenderHint(QPainter.RenderHint.Antialiasing);p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(QColor('#e9e1ef' if self.isDown() else '#f3eef7' if self.underMouse() else SURFACE))
         p.drawEllipse(QRectF(.5,.5,39,39));p.setBrush(Qt.BrushStyle.NoBrush)
         fraction=self._fraction*self.reveal.progress
@@ -127,3 +132,19 @@ class QuotaSatellite(QToolButton):
         p.setPen(QColor(INK))
         for font,text,origin in self._text_runs:
             p.setFont(font);p.drawText(origin,text)
+
+class MinimalQuota(QuotaSatellite):
+    """A single readable quota circle; dragging never expands the panel."""
+    def __init__(self,windows,caption,parent=None):
+        super().__init__(windows,caption,parent);self.setObjectName('minimal_quota');self.setFixedSize(68,68)
+        self.setAccessibleName(self.accessibleName().replace('展开详情','打开正常卡片')+'；可拖动；右键切换模式')
+    def paintEvent(self,event):
+        p=QPainter(self);p.scale(self.width()/40,self.height()/40);self.paint_dial(p)
+    def mousePressEvent(self,event):
+        self.parentWidget().window().card_pointer_press(event);super().mousePressEvent(event)
+    def mouseMoveEvent(self,event):
+        if self.parentWidget().window().card_pointer_move(event):self.setDown(False);event.accept();return
+        super().mouseMoveEvent(event)
+    def mouseReleaseEvent(self,event):
+        if self.parentWidget().window().card_pointer_release():self.setDown(False);event.accept();return
+        super().mouseReleaseEvent(event)

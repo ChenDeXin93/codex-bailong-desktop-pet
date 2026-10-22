@@ -1,61 +1,44 @@
 # 开发与构建
 
-Windows x64、Python 3.12。所有命令从仓库根目录的 PowerShell 执行。
+Windows x64，Python 3.11或3.12。先安装 requirements-enhanced.txt，所有命令从仓库根目录执行。原项目与授权边界见根目录 NOTICE.md。
 
-```powershell
-py -3.12 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements-enhanced.txt
-```
+## 准备动画
 
-## 准备角色动画
+Git不保存大型动画。安装正式版本后，在设置中下载高清素材，再执行 `python tools/import_installed_assets.py`：工具验证并导入高清源和循环接缝，不读取账户、聊天或统计。也可以从 materials Release 下载高清ZIP，解压到 `outputs/白龙桌宠素材/`，其下应直接存在素材清单和quality各目录。不要把512px轻量素材冒充720px构建源。
 
-Git 只存素材清单，不包含数百 MB 的动画。先运行本项目 Release 的一键部署程序；然后把已安装版本目录内的 `outputs/白龙桌宠素材` 拷贝到本仓库同名位置。可使用下面的只读导入工具：它读取安装记录定位当前版本，只复制素材，不复制设置、凭据、聊天或统计，不修改安装状态。
+当前共有25个逻辑动作和6段循环接缝。导入工具支持 `--source` 指向已解压高清目录或含outputs目录的旧高清程序。旧历史质量回归另需原始开发帧；发布播放素材不能替代全部历史夹具。
 
-```powershell
-.\.venv\Scripts\python.exe tools/import_installed_assets.py
-```
+## 本地迭代
 
-也可用 `--source` 指定包含 `outputs/白龙桌宠素材` 的程序目录。导入当前实际播放文件后即可运行或构建；历史原始帧质量回归测试另外依赖开发原素材，Release 的播放素材不能替代全部历史基准。
+`python app/enhanced.py` 运行源码；会使用本用户桌宠数据，测试请隔离LOCALAPPDATA/CODEX_HOME，避免与正在运行的正式程序混用。
 
-```powershell
-.\.venv\Scripts\python.exe app/enhanced.py
-```
+`python build_local.py --build-only` 完整检查并构建应用目录；`python build_local.py --deploy-verified` 实装刚验证且源码未变的构建，备份用户数据并保留回退。默认不生成公开安装器或ZIP。完整历史回归需要开发素材和夹具，干净仓库不能宣称全量708项都可直接运行。
 
-源码运行会使用当前 Windows 用户的桌宠设置，若已安装程序正在运行，应先从托盘退出。不要将用户数据目录加入 Git。
+`python build_release.py` 仅构建应用目录，不改变本机安装。公开发布时显式运行 `python build_release.py --package`，生成默认轻量载荷、程序小包及一键部署EXE；完整Windows下载ZIP还需加入部署文档并验证。`python check_bundle.py` 比对编译模块。输出与缓存不提交Git。
 
-## 验证
+程序小包只省略明确匹配的动画素材，所有程序/运行库/字体来自新包。软件Release须同时提供完整Windows ZIP、program.zip、program.json、合并SHA256SUMS；旧客户端首次迁移、新安装及素材不兼容使用完整包。高清按内容ID单独发布为预发布且不设Latest，不能让资源标签取代软件稳定版。
 
-```powershell
-$env:PYTHONPATH = (Join-Path $PWD 'app')
-$env:QT_QPA_PLATFORM = 'offscreen'
-.\.venv\Scripts\python.exe -m unittest test_quota_summary_data test_spring_motion test_status_reactions.SchedulerTests test_ring_metrics
-```
+## 不依赖外部动画的检查
 
-这些是无需原动画的定向检查，CI 使用相同入口。`app/test_*.py` 还包含 UI、动画、安装事务、已读识别等专项检查；部分需要完整素材、特定构建产物或历史验证夹具，不能把缺少这些条件的全量扫描宣称为通过。视频分类单元测试不替代真实播放器全屏验收。
+在PowerShell设置 `$env:PYTHONPATH='app'` 与 `$env:QT_QPA_PLATFORM='offscreen'`，然后运行 `.github/workflows/checks.yml` 中列出的unittest模块。CI使用相同入口并编译检查app与tools；涉及真实桌面、安装、历史素材及浏览器的验收另行运行。
 
-## 构建一键部署程序
+## 关键模块
 
-```powershell
-.\.venv\Scripts\python.exe build_release.py
-.\.venv\Scripts\python.exe check_bundle.py
-```
-
-构建脚本先逐帧验证并无损优化当前播放动画，再由 PyInstaller 打包运行库和安装器。产物在 `release/`，缓存在 `build/`。这两处均不提交 Git。角色动画是包体大头之一；只放 GitHub Release，避免仓库历史长期膨胀。
-
-这里不提供自动安装、覆盖本机版本的构建后动作。要试装请运行生成的一键部署程序，先验证再替换上一版发布物；保留用户数据及已安装回退版本。
-
-## 主要模块
-
-| 模块 | 职责 |
+| 模块 | 作用 |
 | --- | --- |
-| app/enhanced.py / desktop.py | 主程序、桌宠与后台服务协作 |
-| enhanced_core.py / codex_live_status.py / session_read_state.py | 日志、实时状态、会话已读 |
-| compact_bubble.py / surface_morph.py / panel_transition.py | 气泡、胶囊和连续窗口过渡 |
-| status_indicator.py / refresh_indicator.py | 状态与刷新矢量动画 |
-| token_calendar.py / token_analytics.py / daily_report.py | 增量统计与日报 |
-| video_fullscreen.py / firefox_video.py / video_yield.py | 视频识别和置顶优先级 |
-| installer.py / deployment_state.py / shared_assets.py | 安装事务、恢复与素材共享 |
+| desktop / enhanced | 人物、卡片、后台服务与生命周期 |
+| stream_player / sustained_player / decode_runtime / loop_cache | 有界解码、共用中段和尾部读取、高精度帧时钟、异步取消及压缩循环缓存 |
+| continuous_work / status_reactions | 稳定语义与主会话优先、完整尾部和完成优先 |
+| compact_bubble / surface_morph / linked_report_motion | 胶囊、卡片和日报原生交接 |
+| token_analytics / daily_report | 增量统计、小时/模型与日报 |
+| material_store / material_controller | 轻量默认、高清校验和安全切换 |
+| app_updates / program_updates / program_update_apply | 完整/程序更新、素材兼容检查、事务安装与回退 |
+| installer / deployment_state / shared_assets | nonce就绪、用户数据备份、入口切换与素材复用 |
 
-书本等量计数工具 `tools/build_book_catalog.py` 额外需要 `tiktoken`；应用运行不需要 tokenizer，也不包含整本书文本。
+人物帧时钟使用perf_counter，业务状态保留monotonic，不能混算绝对值。取消只发停止信号，GUI不等待旧解码线程；每个生产者独立队列，旧任务不可发布新缓存。24MiB只是压缩循环缓存预算，不是进程总内存。
 
-原项目：https://github.com/jingh12312-rgb/bailong-desktop-pet 。授权说明见仓库根目录 NOTICE.md。
+## 高清资源构建
+
+可本地运行 `python build_materials.py --package-hd`，会验证源帧并生成独立资源ZIP。仓库还提供手动触发的Publish HD materials工作流：读取已公开且固定SHA的v0.7.2基包、当前素材清单及六段已验证接缝输入；把旧安装器当数据读取，不执行它。每个素材逐一校验，最终ZIP需与本地规范组装SHA一致，上传完整后再公开资源预发布，不修改稳定Latest。此工作流只针对当前内容版本；后续换源须重新评审和验证。
+
+书本等量工具额外需要tiktoken；应用本身不打包整本书或tokenizer。不得提交凭据、真实会话、日志、用户数据库、运行配置或安装器。

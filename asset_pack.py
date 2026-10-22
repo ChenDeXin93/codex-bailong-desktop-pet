@@ -62,9 +62,10 @@ def optimize_all():
     import sys
     sys.path.insert(0,str(ROOT/'app'))
     from desktop_services import all_items
+    from sustained_assets import seam_items
     CACHE.mkdir(parents=True,exist_ok=True)
     manifest=json.loads((ROOT/'outputs/白龙桌宠素材/素材清单.json').read_text(encoding='utf-8'))
-    with ThreadPoolExecutor(max_workers=2) as workers:records=list(workers.map(optimize_one,all_items(manifest)))
+    with ThreadPoolExecutor(max_workers=2) as workers:records=list(workers.map(optimize_one,all_items(manifest)+seam_items(manifest)))
     report=dict(recipe=RECIPE,passed=True,files=records,rawBytes=sum(r['rawBytes'] for r in records),optimizedBytes=sum(r['optimizedBytes'] for r in records))
     (CACHE/'summary.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')
     return report

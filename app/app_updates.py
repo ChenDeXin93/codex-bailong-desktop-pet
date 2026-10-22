@@ -33,6 +33,11 @@ class Release:
     notes:str=''
     published:str=''
     checksum_url:str=''
+    kind:str='full'
+    material_id:str=''
+    program_info_url:str=''
+    fallback:object=None
+    reason:str=''
     @property
     def url(self):return release_url(self.tag)
 
@@ -41,12 +46,21 @@ def parse_release(data):
     tag=str(data.get('tag_name',''));version='.'.join(map(str,version_tuple(tag)))
     names=(f'bailong-desktop-pet-{version}-windows-x64.zip',f'白龙桌宠-{version}-一键部署包.zip')
     assets=data.get('assets') or [];asset=next((a for name in names for a in assets if a.get('name')==name and a.get('state')=='uploaded'),None)
-    if not asset:raise UpdateError('该版本尚未提供完整 Windows 安装包')
+    full_asset=asset
+    program_name=f'bailong-desktop-pet-{version}-program.zip';info_name=f'bailong-desktop-pet-{version}-program.json'
+    program=next((a for a in assets if a.get('name')==program_name and a.get('state')=='uploaded'),None)
+    info=next((a for a in assets if a.get('name')==info_name and a.get('state')=='uploaded' and type(a.get('size')) is int and 0<a['size']<=65536),None)
+    if not asset and not (program and info):raise UpdateError('该版本尚未提供完整 Windows 安装包')
+    if program and info:asset=program
     size=asset.get('size')
     if type(size) is not int or not 0<size<=MAX_PACKAGE:raise UpdateError('更新文件大小异常')
     digest=str(asset.get('digest') or '').lower();sha=digest[7:] if re.fullmatch(r'sha256:[0-9a-f]{64}',digest) else ''
     checksum=next((a for a in assets if a.get('name')=='SHA256SUMS.txt' and a.get('state')=='uploaded' and 0<a.get('size',0)<=65536),None)
-    return Release(version,tag,asset['name'],asset_url(asset.get('browser_download_url'),tag,asset['name']),size,sha,str(data.get('body') or '')[:20000],str(data.get('published_at') or ''),asset_url(checksum['browser_download_url'],tag,'SHA256SUMS.txt') if checksum else '')
+    result=Release(version,tag,asset['name'],asset_url(asset.get('browser_download_url'),tag,asset['name']),size,sha,str(data.get('body') or '')[:20000],str(data.get('published_at') or ''),asset_url(checksum['browser_download_url'],tag,'SHA256SUMS.txt') if checksum else '')
+    if program and info:
+        fallback=parse_release(dict(data,assets=[a for a in assets if a is not program and a is not info])) if full_asset else None
+        result=replace(result,kind='program',program_info_url=asset_url(info['browser_download_url'],tag,info_name),fallback=fallback)
+    return result
 
 def allowed_redirect(url):
     p=urllib.parse.urlsplit(url);host=p.hostname or ''
@@ -74,15 +88,31 @@ def read_small(url,limit,opener=open_url,cancel=lambda:False):
     if len(data)>limit:raise UpdateError('更新信息过大，请到 GitHub 查看')
     return data
 
-def check_release(current,opener=open_url,cancel=lambda:False):
+def ensure_checksum(release,opener=open_url,cancel=lambda:False):
+    if release.sha256:return release
+    if not release.checksum_url:raise UpdateError('该版本没有可验证的校验值，暂不能在应用内安装')
+    text=read_small(release.checksum_url,65536,opener,cancel).decode('utf-8-sig')
+    found=next((m[1].lower() for line in text.splitlines() if (m:=re.fullmatch(r'([0-9A-Fa-f]{64})\s+\*?(.+)',line)) and m[2]==release.asset_name),None)
+    if not found:raise UpdateError('安装包校验值缺失，暂不能在应用内安装')
+    return replace(release,sha256=found)
+
+def check_release(current,opener=open_url,cancel=lambda:False,app_root=None):
     try:
         release=parse_release(json.loads(read_small(API,2_000_000,opener,cancel)))
-        if version_tuple(release.version)>version_tuple(current) and not release.sha256:
-            if not release.checksum_url:raise UpdateError('该版本没有可验证的校验值，暂不能在应用内安装')
-            text=read_small(release.checksum_url,65536,opener,cancel).decode('utf-8-sig')
-            found=next((m[1].lower() for line in text.splitlines() if (m:=re.fullmatch(r'([0-9A-Fa-f]{64})\s+\*?(.+)',line)) and m[2]==release.asset_name),None)
-            if not found:raise UpdateError('安装包校验值缺失，暂不能在应用内安装')
-            release=replace(release,sha256=found)
+        if version_tuple(release.version)>version_tuple(current):
+            if release.kind=='program':
+                from program_updates import local_materials,MaterialMismatch
+                from pet import ROOT
+                try:
+                    info=json.loads(read_small(release.program_info_url,65536,opener,cancel))
+                    if info.get('schema')!=1 or info.get('kind')!='program' or info.get('version')!=release.version or not re.fullmatch('[0-9a-f]{24}',str(info.get('materialId',''))):raise MaterialMismatch('纯程序包说明不匹配')
+                    local_materials(app_root or ROOT,info['materialId'],cancel)
+                    release=ensure_checksum(replace(release,material_id=info['materialId']),opener,cancel)
+                except UpdateCancelled:raise
+                except (UpdateError,OSError,ValueError,KeyError) as exc:
+                    if not release.fallback:raise UpdateError('本机暂不能使用该纯程序包，且该版本未提供完整包') from exc
+                    release=replace(release.fallback,reason='本地素材不兼容或程序包说明不可用，改用完整安装包')
+            release=ensure_checksum(release,opener,cancel)
         return release
     except urllib.error.HTTPError as exc:
         if exc.code==404:raise NoRelease('暂无公开稳定版本') from None
@@ -107,38 +137,44 @@ def digest_file(path,cancel=lambda:False):
         while chunk:=stream.read(1024*1024):check_cancel(cancel);digest.update(chunk)
     return digest.hexdigest()
 
+def download_archive(release,paths,progress=lambda *a:None,cancel=lambda:False,opener=open_url):
+    if not re.fullmatch('[0-9a-f]{64}',release.sha256):raise UpdateError('更新包校验值缺失')
+    archive=paths['archive'];part=paths['part']
+    if not archive.exists():
+        offset=part.stat().st_size if part.exists() else 0
+        if offset>release.size:part.unlink();offset=0
+        if offset<release.size:
+            check_cancel(cancel);progress(offset,release.size,'downloading')
+            with opener(release.download_url,{'Range':f'bytes={offset}-'} if offset else {}) as response:
+                status=getattr(response,'status',200)
+                if offset and status==206:
+                    match=re.fullmatch(r'bytes (\d+)-(\d+)/(\d+)',response.headers.get('Content-Range',''))
+                    if not match or int(match[1])!=offset or int(match[3])!=release.size:raise UpdateError('续传响应异常，请稍后重试')
+                elif status==200:offset=0
+                else:raise UpdateError('下载响应异常，请稍后重试')
+                mode='ab' if offset else 'wb';last=0.;progress(offset,release.size,'downloading')
+                with part.open(mode) as output:
+                    while True:
+                        check_cancel(cancel);chunk=response.read(256*1024)
+                        if not chunk:break
+                        offset+=len(chunk)
+                        if offset>release.size:raise UpdateError('下载文件大小与发布信息不一致')
+                        output.write(chunk);now=time.monotonic()
+                        if now-last>=.2:progress(offset,release.size,'downloading');last=now
+            if offset!=release.size:raise UpdateError('下载未完成，可稍后继续')
+        progress(release.size,release.size,'verifying')
+        if digest_file(part,cancel)!=release.sha256:
+            part.unlink(missing_ok=True);raise UpdateError('安装包校验未通过，请重新下载')
+        part.replace(archive)
+    elif archive.stat().st_size!=release.size or digest_file(archive,cancel)!=release.sha256:
+        archive.unlink();raise UpdateError('缓存校验未通过，请重新下载')
+    return archive
+
 def stage_installer(release,root,progress=lambda *args:None,cancel=lambda:False,opener=open_url):
     if not re.fullmatch('[0-9a-f]{64}',release.sha256):raise UpdateError('安装包校验值缺失')
     paths=cache_paths(root,release.version);archive=paths['archive'];part=paths['part']
     try:
-        if not archive.exists():
-            offset=part.stat().st_size if part.exists() else 0
-            if offset>release.size:part.unlink();offset=0
-            if offset<release.size:
-                check_cancel(cancel);progress(offset,release.size,'downloading')
-                with opener(release.download_url,{'Range':f'bytes={offset}-'} if offset else {}) as response:
-                    status=getattr(response,'status',200)
-                    if offset and status==206:
-                        match=re.fullmatch(r'bytes (\d+)-(\d+)/(\d+)',response.headers.get('Content-Range',''))
-                        if not match or int(match[1])!=offset or int(match[3])!=release.size:raise UpdateError('续传响应异常，请稍后重试')
-                    elif status==200:offset=0
-                    else:raise UpdateError('下载响应异常，请稍后重试')
-                    mode='ab' if offset else 'wb';last=0.;progress(offset,release.size,'downloading')
-                    with part.open(mode) as output:
-                        while True:
-                            check_cancel(cancel);chunk=response.read(256*1024)
-                            if not chunk:break
-                            offset+=len(chunk)
-                            if offset>release.size:raise UpdateError('下载文件大小与发布信息不一致')
-                            output.write(chunk);now=time.monotonic()
-                            if now-last>=.2:progress(offset,release.size,'downloading');last=now
-                if offset!=release.size:raise UpdateError('下载未完成，可稍后继续')
-            progress(release.size,release.size,'verifying')
-            if digest_file(part,cancel)!=release.sha256:
-                part.unlink(missing_ok=True);raise UpdateError('安装包校验未通过，请重新下载')
-            part.replace(archive)
-        elif archive.stat().st_size!=release.size or digest_file(archive,cancel)!=release.sha256:
-            archive.unlink();raise UpdateError('缓存校验未通过，请重新下载')
+        download_archive(release,paths,progress,cancel,opener)
         check_cancel(cancel);progress(release.size,release.size,'extracting')
         expected=f'白龙桌宠-{release.version}-一键部署.exe'
         with zipfile.ZipFile(archive) as bundle:
@@ -161,6 +197,8 @@ def stage_installer(release,root,progress=lambda *args:None,cancel=lambda:False,
     finally:paths['staging'].unlink(missing_ok=True)
 
 def prune_completed(root,current):
+    from program_updates import prune_program_cache
+    prune_program_cache(root,current)
     root=Path(root)
     if not root.is_dir() or root.is_symlink() or root.is_junction():return
     for base in root.iterdir():

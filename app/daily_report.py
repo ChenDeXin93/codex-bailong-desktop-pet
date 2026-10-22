@@ -168,6 +168,8 @@ class DailyReport(QWidget):
         self.refresh_button.hide()
         self.animation=QVariantAnimation(self);self.animation.setDuration(260);self.animation.setEasingCurve(QEasingCurve.Type.Linear)
         self.animation.valueChanged.connect(self._advance);self.animation.finished.connect(self._finished)
+        from linked_report_motion import LinkedReportMotion
+        self.follow=LinkedReportMotion(self);self.animation.finished.connect(bubble._apply_pending_mode)
         bubble.installEventFilter(self);self.hide();self.rebuild()
     def label(self,text,size=11,bold=False):
         size=max(10,size)
@@ -186,7 +188,7 @@ class DailyReport(QWidget):
         r=snapshot.get('report') or {};old=previous.get('report') or {}
         if r==old and all(snapshot.get(k)==previous.get(k) for k in ('partial','unavailable')):return
         if r.get('day')!=old.get('day') or r.get('daily_models')!=old.get('daily_models'):self._series_cache.clear()
-        if self._animating:
+        if self._animating or self.follow.active:
             self._pending_rebuild=True;return
         if self.requested:
             if r and self.report:
@@ -217,7 +219,7 @@ class DailyReport(QWidget):
         if self.selected_model and not any(item['model']==self.selected_model for item in series['models']):self.selected_model=None
         return series
     def chart_entry(self):
-        if not self._animating and self.plot:
+        if not self._animating and not self.follow.active and self.plot:
             self.plot.begin_reveal();QTimer.singleShot(0,self.plot,self.plot.start_reveal)
     def set_page(self,page):
         if self.page==page:
@@ -228,11 +230,11 @@ class DailyReport(QWidget):
             if period in self.range_buttons:self.range_buttons[period].setChecked(True)
             return
         self.period=period;self.selected_model=None
-        if self._animating:self._pending_rebuild=True;return
+        if self._animating or self.follow.active:self._pending_rebuild=True;return
         if self.page=='models' and self.report:self._update_models();self.chart_entry()
     def select_model(self,model):
         self.selected_model=None if self.selected_model==model else model
-        if self._animating:self._pending_rebuild=True;return
+        if self._animating or self.follow.active:self._pending_rebuild=True;return
         if self.page=='models' and self.report:self._update_models();self.chart_entry()
     def _update_models(self):
         series=self._series()
@@ -296,7 +298,7 @@ class DailyReport(QWidget):
         self._update_analogy(self.report)
         self.sync_geometry()
     def rebuild(self):
-        if self._animating:
+        if self._animating or self.follow.active:
             self._pending_rebuild=True;return
         self._building=True
         self.refresh_button.hide();self.refresh_button.setParent(self.surface)
@@ -404,13 +406,17 @@ class DailyReport(QWidget):
             self._book_opened=True
             top=bool(self.bubble.windowFlags()&Qt.WindowType.WindowStaysOnTopHint)
             if bool(self.windowFlags()&Qt.WindowType.WindowStaysOnTopHint)!=top:self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint,top)
-            self.rebuild();owner=self.bubble.parentWidget()
+            self.rebuild();owner=self.bubble.owner_pet()
             if owner and getattr(owner,'enhanced_ready',False):owner.stop_walk();owner.position_bubble()
             self.sync_geometry();self._prepare_frame()
         self.show();self.raise_();self._input_passthrough(True)
+        self.follow.prewarm()
         self._start_animation(1.)
     def dismiss(self):
         if not self.requested and not self.isVisible():return
+        if self.follow.active:
+            if self.follow.committed:self._dismiss_after_host=True;return
+            self.follow.cancel()
         self.animation.stop();self.requested=False
         if not self._animating:
             self.sync_geometry();self._prepare_frame()
@@ -492,10 +498,10 @@ class DailyReport(QWidget):
         self.repaint()
         if self.plot:self.plot.start_reveal()
     def sync_geometry(self):
-        if self._building or self._syncing:return
+        if self._building or self._syncing or self.follow.active:return
         b=self.bubble
         if not b.isVisible():self.hide();return
-        if self._animating:
+        if self._animating or self.follow.active:
             # Follow an anchor move without invalidating the backing store.
             # Width/height changes wait until the frozen frame is released.
             if self.requested:
@@ -516,10 +522,11 @@ class DailyReport(QWidget):
     def eventFilter(self,obj,event):
         if obj is self.bubble:
             if event.type() in (QEvent.Type.Move,QEvent.Type.Resize):
-                if self.requested or self.isVisible():self.sync_geometry()
+                if not self.follow.active and (self.requested or self.isVisible()):self.sync_geometry()
             elif event.type()==QEvent.Type.Hide:self.hide()
         return False
     def hideEvent(self,event):
+        self.follow.cancel()
         self.animation.stop();self.requested=False;self.fraction=0.;self._animating=False;self._frame=None
         self._input_passthrough(False);self.surface.hide()
         self.refresh_button.resume_motion('surface')
@@ -530,5 +537,6 @@ class DailyReport(QWidget):
         p.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source)
         p.fillRect(self.rect(),Qt.GlobalColor.transparent)
         p.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
+        if self.follow.active:return  # Only the independent fixed canvas presents linked motion.
         if not self.requested and not self._animating and self.surface.isHidden():return
         paint_card(p,self.visual_rect(),self._frame,self.fraction if self._frame is not None else 1.)

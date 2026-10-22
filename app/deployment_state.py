@@ -70,7 +70,7 @@ def restore_entries(root,snapshot,system):
 
 def owned_destination(root,name):
     root=Path(root).resolve();versions=root/'versions';dest=versions/name
-    if not isinstance(name,str) or not name or dest.is_symlink() or versions.is_symlink() or dest.resolve().parent!=versions.resolve():raise ValueError('暂存版本路径无效')
+    if not isinstance(name,str) or not name or dest.is_symlink() or dest.is_junction() or versions.is_symlink() or versions.is_junction() or dest.resolve().parent!=versions.resolve():raise ValueError('暂存版本路径无效')
     return dest.resolve()
 
 def stop_version(exe):

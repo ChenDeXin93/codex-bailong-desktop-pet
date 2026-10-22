@@ -71,7 +71,7 @@ class Pet(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
         self.setWindowTitle('白龙桌宠');self.setFixedSize(256,256)
-        self.manifest=json.loads((ASSETS/'素材清单.json').read_text(encoding='utf-8'))
+        self.manifest=json.loads((getattr(self,'asset_root',ASSETS)/'素材清单.json').read_text(encoding='utf-8'))
         self.variants=[v for v in self.manifest['variants'] if self.asset_path(v).is_file()]
         self.idles=[self.manifest['idle']]+self.manifest.get('additionalIdleAnimations',[])[:1]
         self.cache=OrderedDict();self.pinned_frames={};self.frames=[];self.current=None;self.mode='idle';self.index=0
@@ -178,10 +178,12 @@ class Pet(QWidget):
             painter.fillRect(self.rect(),Qt.GlobalColor.transparent)
             painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
             self.draw_frame(painter,QRectF(self.rect()))
-    def draw_frame(self,painter,canvas):
+    def frame_target(self,canvas):
         scale=self.current.get('renderScale',1.0);offset=self.current.get('renderOffset',[0,0])
         width,height=canvas.width()*scale,canvas.height()*scale
-        target=QRectF(canvas.x()+(canvas.width()-width)/2+canvas.width()*offset[0],canvas.y()+canvas.height()-height+canvas.height()*offset[1],width,height)
+        return QRectF(canvas.x()+(canvas.width()-width)/2+canvas.width()*offset[0],canvas.y()+canvas.height()-height+canvas.height()*offset[1],width,height)
+    def draw_frame(self,painter,canvas):
+        target=self.frame_target(canvas)
         frame=self.frames[self.index];painter.drawPixmap(target,frame,QRectF(frame.rect()))
     def snapshot_frame(self):
         pixmap=QPixmap(self.frame_size,self.frame_size);pixmap.fill(Qt.GlobalColor.transparent)

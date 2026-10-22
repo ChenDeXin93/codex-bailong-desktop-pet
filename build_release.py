@@ -5,11 +5,12 @@ ROOT=Path(__file__).resolve().parent
 sys.path.insert(0,str(ROOT/'app'))
 from desktop_core import VERSION
 from desktop_services import all_items
+from sustained_assets import seam_items
 from release_version import validate_new_version
-def build(legacy_formats=False):
+def build(legacy_formats=False,application_only=True):
     validate_new_version(VERSION)
-    from asset_pack import optimize_all,CACHE
-    optimized=optimize_all();optimized_by_id={v['id']:v for v in optimized['files']}
+    from build_materials import build as build_materials,DEST
+    catalog=build_materials()
     subprocess.run([sys.executable,'-m','PyInstaller','--noconfirm','--windowed','--onedir','--name','BailongEnhanced','--distpath','release','--workpath','build','--specpath','build','--paths','app','--exclude-module','imageio_ffmpeg','app/enhanced.py'],cwd=ROOT,check=True)
     release=ROOT/'release/BailongEnhanced'
     from package_trim import trim_qt
@@ -21,15 +22,21 @@ def build(legacy_formats=False):
     asset_dest.mkdir(parents=True,exist_ok=True)
     manifest=json.loads((asset_root/'素材清单.json').read_text(encoding='utf-8'))
     shutil.copy2(asset_root/'素材清单.json',asset_dest/'素材清单.json')
-    for item in all_items(manifest):
+    for item in all_items(manifest)+seam_items(manifest):
         name=item.get('playbackFile') or item['file'];source=(asset_root/name).resolve();target=(asset_dest/name).resolve()
         if not source.is_relative_to(asset_root.resolve()) or not target.is_relative_to(asset_dest.resolve()):raise ValueError('素材打包路径无效')
-        record=optimized_by_id[item['id']]
-        assert record['sourceSha256']==__import__('asset_pack').digest(source) and record['exactRGBA']
-        packed=CACHE/(item['id']+'.webp');assert record['outputSha256']==__import__('asset_pack').digest(packed)
+        record=next(f for f in catalog['tiers']['light']['files'] if f['path']==name)
+        packed=DEST/name;assert record['sha256']==__import__('asset_pack').digest(packed)
         target.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(packed,target)
     shutil.copy2(ROOT/'状态响应优化/更新说明.txt',release/'持续状态响应说明.txt')
     shutil.copy2(ROOT/'应用内更新/更新说明.txt',release/'应用内更新说明.txt')
+    shutil.copy2(ROOT/'持续状态动画/更新说明.txt',release/'连续状态动画说明.txt')
+    shutil.copy2(ROOT/'卡片独立与极简/更新说明.txt',release/'独立卡片与极简模式说明.txt')
+    shutil.copy2(ROOT/'日报防闪与自然循环/更新说明.txt',release/'日报防闪与自然循环说明.txt')
+    shutil.copy2(ROOT/'轻量与高清分离/更新说明.txt',release/'轻量与高清素材说明.txt')
+    shutil.copy2(ROOT/'纯程序更新/更新说明.txt',release/'纯程序更新说明.txt')
+    local_notes=ROOT/'本地实装/更新说明.txt'
+    if local_notes.exists():shutil.copy2(local_notes,release/'本地实装与交互修复说明.txt')
     notes=ROOT/'动作质量修复/原始动作逻辑与质量基准.txt'
     shutil.copy2(ROOT/'新增动作接入/更新说明.txt',release/'新增动作与Codex联动说明.txt')
     shutil.copy2(ROOT/'发布说明/版本编号规则.json',release/'版本编号规则.json')
@@ -67,6 +74,7 @@ def build(legacy_formats=False):
     shutil.copytree(ROOT/'app/fonts',release/'app/fonts',dirs_exist_ok=True)
     shutil.copytree(ROOT/'app/licenses',release/'app/licenses',dirs_exist_ok=True)
     shutil.copy2(ROOT/'app/book_catalog.json',release/'app/book_catalog.json')
+    shutil.copy2(ROOT/'app/material_catalog.json',release/'app/material_catalog.json')
     shutil.copy2(ROOT/'额度卡片重设计/更新说明.txt',release/'额度卡片与快捷说明.txt')
     shutil.copy2(ROOT/'子会话完成提醒修复/更新说明.txt',release/'子会话完成提醒修复说明.txt')
     shutil.copy2(ROOT/'交互整理第一批/更新说明.txt',release/'交互整理第一批说明.txt')
@@ -97,6 +105,9 @@ def build(legacy_formats=False):
         if p.is_file() and p.name!='payload-manifest.json':
             with p.open('rb') as stream:integrity[p.relative_to(release).as_posix()]={'bytes':p.stat().st_size,'sha256':hashlib.file_digest(stream,'sha256').hexdigest()}
     (release/'payload-manifest.json').write_text(json.dumps({'version':VERSION,'files':integrity},ensure_ascii=False),encoding='utf-8')
+    if application_only:return release
+    from build_program_update import package as package_program
+    package_program(release,ROOT/'release')
     payload=ROOT/'build/payload.zip'
     with zipfile.ZipFile(payload,'w',zipfile.ZIP_DEFLATED,compresslevel=3) as archive:
         for path in sorted(release.rglob('*')):
@@ -112,4 +123,7 @@ def build(legacy_formats=False):
     (ROOT/'release/SHA256.json').write_text(json.dumps(files,ensure_ascii=False,indent=2),encoding='utf-8')
 if __name__=='__main__':
     parser=argparse.ArgumentParser();parser.add_argument('--legacy-formats',action='store_true',help='Also build portable and manual installer when explicitly needed')
-    build(parser.parse_args().legacy_formats)
+    parser.add_argument('--package',action='store_true',help='Explicitly generate the full installer for a GitHub release')
+    args=parser.parse_args()
+    if args.legacy_formats and not args.package:parser.error('--legacy-formats also requires --package')
+    build(args.legacy_formats,application_only=not args.package)

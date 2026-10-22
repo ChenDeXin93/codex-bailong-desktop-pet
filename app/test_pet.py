@@ -1,6 +1,8 @@
 import os
 os.environ['QT_QPA_PLATFORM']='offscreen'
-import unittest, time
+import unittest, time,tempfile,json
+from pathlib import Path
+from PIL import Image
 from unittest.mock import patch
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import Qt, QPoint, QTimer
@@ -10,11 +12,26 @@ from quota import quota_windows
 
 app=QApplication.instance() or QApplication([])
 class Tests(unittest.TestCase):
-    def setUp(self):self.pet=Pet();self.pet.show()
+    def setUp(self):
+        # This legacy eager-player suite tests its mechanics with small real
+        # animations, rather than decoding gigabytes of current production art.
+        self.tmp=tempfile.TemporaryDirectory();assets=Path(self.tmp.name)
+        def item(key,**extra):
+            frames=[Image.new('RGBA',(24,24),(40+i*50,80,100,255)) for i in range(3)]
+            frames[0].save(assets/(key+'.webp'),save_all=True,append_images=frames[1:],duration=[42,42,41],lossless=True)
+            return dict(id=key,name=key,file=key+'.webp',durationMs=125,**extra)
+        manifest=dict(idle=item('idle'),additionalIdleAnimations=[item('idle2')],variants=[item('v'+str(i)) for i in range(10)],
+                      dragAnimation=item('drag'),landingAnimation=item('landing',originalDurationMs=2000),quotaAnimation=item('quota'))
+        (assets/'素材清单.json').write_text(json.dumps(manifest),encoding='utf-8')
+        self.patches=[patch('pet.ASSETS',assets),patch('pet.ROOT',assets),patch.object(Pet,'play_click_sound')]
+        for p in self.patches:p.start()
+        self.pet=Pet();self.pet.show()
     def tearDown(self):
         self.pet.tick.stop();self.pet.bubble.close();self.pet.hide()
         self.pet.frames=[];self.pet.cache.clear();self.pet.pinned_frames.clear();self.pet.transition=None
         self.pet.deleteLater();app.processEvents()
+        for p in reversed(self.patches):p.stop()
+        self.tmp.cleanup()
     def test_all_assets_and_idle_weights(self):
         self.assertEqual(len(self.pet.variants),10)
         for item in self.pet.idles+self.pet.variants:self.assertEqual(len(self.pet.load(item)),round(item['durationMs']*24/1000))

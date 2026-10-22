@@ -405,7 +405,7 @@ class CompactBubble(Bubble):
     modeChanged=Signal(str)
     dataBusyChanged=Signal(str,bool)
     def __init__(self,owner=None):
-        super().__init__();self.setParent(owner,self.windowFlags())
+        super().__init__();self._owner=owner;self.setParent(owner,self.windowFlags())
         self.report=None;self.inline_explanations=InlineExplanationOnly(self);QApplication.instance().installEventFilter(self.inline_explanations)
         self.content=QWidget(self);self.content.setLayout(self.layout);self.content.setFixedWidth(268);self.content.show()
         self.setFixedWidth(268);self.layout.setContentsMargins(10,6,10,6);self.layout.setSpacing(3)
@@ -435,7 +435,7 @@ class CompactBubble(Bubble):
             palette.setColor(role,QColor(color))
         self.editor_stack.setPalette(palette)
         self.status_indicator=StatusIndicator(self.content)
-        self.island=None;self._quota_reset_requested=None
+        self.island=None;self.minimal_quota=None;self._quota_reset_requested=None;self._card_press=None;self._card_dragged=False
         self.status_indicator.changed.connect(self._refresh_island_status)
         self.size_transition=PanelTransition(self)
         self.size_transition.animation.finished.connect(self._apply_pending_mode)
@@ -443,6 +443,7 @@ class CompactBubble(Bubble):
         self.status_view.conversationRequested.connect(self.conversationRequested.emit)
         self.status_view.overflow.clicked.connect(self.cycle_conversations)
         self.status_view.heightChanged.connect(self._status_height_changed)
+        self.status_view.animation.finished.connect(self._status_height_finished)
         self.setWindowTitle('白龙增强版 · 状态气泡');self.redraw()
     def clear(self):
         # Headers are rebuilt; the tiny task animation must keep its clock.
@@ -450,7 +451,7 @@ class CompactBubble(Bubble):
         for widget in self.content.findChildren(QWidget):
             if widget.isVisible() and type(widget).__name__=='TokenPlot' and widget.reveal.animation.state()==QAbstractAnimation.State.Running:
                 self._plot_resume=widget.reveal.animation.currentTime()
-        self.island=None;self._status_title=None;self._status_badge=None;self._header=None;self.today_tokens_card=None;self.status_indicator.set_island(False)
+        self.island=None;self.minimal_quota=None;self._status_title=None;self._status_badge=None;self._header=None;self.today_tokens_card=None;self.status_indicator.set_island(False)
         self.status_indicator.hide();self.status_indicator.setParent(self.content)
         self.refresh_button.hide();self.refresh_button.setParent(self.content)
         while self.layout.count():
@@ -461,6 +462,8 @@ class CompactBubble(Bubble):
     def label(self,text):
         label=QLabel(text);label.setTextFormat(Qt.TextFormat.PlainText);label.setWordWrap(True);return self.add(label)
     def toggle_details(self):
+        if self.report and self.report.requested and self.report._animating:
+            self._pending_navigation=('toggle',None);return
         if self.size_transition.running:self._pending_navigation=('toggle',None);self._pending_mode=None;return
         if self.panel_page!='status':self.collapse_to_normal();return
         self.size_transition.begin();self.expanded=not self.expanded;self.redraw();self.size_transition.commit()
@@ -491,7 +494,7 @@ class CompactBubble(Bubble):
         self._editing_flags(True);self.redraw();self.size_transition.commit()
     def _editing_flags(self,editing):
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating,not editing)
-        through=bool(getattr(self.parentWidget(),'settings',{}).get('mouse_through',False)) and not editing
+        through=bool(getattr(self.owner_pet(),'settings',{}).get('mouse_through',False)) and not editing
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents,through)
         if self.windowHandle():self.windowHandle().setFlag(Qt.WindowType.WindowTransparentForInput,through)
     def navigation(self):
@@ -531,7 +534,7 @@ class CompactBubble(Bubble):
         screen=self.screen() or QApplication.primaryScreen();area=screen.availableGeometry()
         self.content.setFixedWidth(min(560,area.width()-24));self.editor_stack.setFixedHeight(min(520,max(220,area.height()-104)))
         self._redrawing=False;self._fit_height()
-        owner=self.parentWidget()
+        owner=self.owner_pet()
         if owner is None or owner.isVisible():self.show()
         self._position_now()
 
@@ -641,6 +644,7 @@ class CompactBubble(Bubble):
         if self.size_transition.running or self.size_transition.preparing:
             self.size_transition.status_deferred=True;return
         if self.panel_page!='status':return
+        if self.is_minimal():return
         if self.is_island():
             if self.island is None:self.redraw();return
             from conversation_roster import LABELS
@@ -656,6 +660,7 @@ class CompactBubble(Bubble):
     def redraw(self):
         if self.size_transition.running:self.size_transition.deferred=True;return
         if self.panel_page!='status':self._redraw_editor();return
+        if self.is_minimal():self._redraw_minimal();return
         if self.is_island():self._redraw_island();return
         self._redrawing=True
         if self.details_tabs:
@@ -716,9 +721,9 @@ class CompactBubble(Bubble):
                 self.details_tabs=DetailsTabs(self);self.add(self.details_tabs)
         self._redrawing=False;self._fit_height()
         self.set_quota_busy(self.quota_busy);self.set_reset_busy(self.reset_busy);self.set_token_busy(self.token_busy)
-        owner=self.parentWidget()
-        if self.enabled and (owner is None or owner.isVisible()):self.show()
-        elif owner is None or owner.isVisible():self.size_transition.dismiss()
+        owner=self.owner_pet()
+        if self.enabled and self.host_visible():self.show()
+        elif self.host_visible():self.size_transition.dismiss()
         else:self.hide()
         if self.details_tabs:
             tabs=self.details_tabs;positions=dict(self.detail_scroll)
@@ -732,8 +737,15 @@ class CompactBubble(Bubble):
             for widget in self.content.findChildren(QWidget):
                 if widget.isVisible() and type(widget).__name__=='TokenPlot':
                     widget.reveal.prepare();widget.reveal.start();widget.reveal.animation.setCurrentTime(self._plot_resume)
+    def owner_pet(self):return self._owner or self.parentWidget()
+    def host_visible(self):
+        owner=self.owner_pet()
+        return owner is None or (owner.card_surface_visible() if hasattr(owner,'card_surface_visible') else owner.isVisible())
+    def is_minimal(self):return self.panel_page=='status' and not self.expanded and self.bubble_mode=='minimal'
+    def is_compact(self):return self.is_island() or self.is_minimal()
     def is_island(self):return self.panel_page=='status' and not self.expanded and (self.bubble_mode=='mini' or self.auto_compact)
     def set_mode(self,mode):
+        if mode not in ('auto','mini','minimal'):raise ValueError('未知的卡片显示模式')
         if self.size_transition.running:self._pending_mode=mode;self._pending_navigation=None;return
         self.size_transition.begin();self.bubble_mode=mode;self.auto_compact=False;self.expanded=False;self.panel_page='status';self._editor_origin=None
         self.last_task_update=time.monotonic();self._manual_grace_until=self.last_task_update+15
@@ -800,13 +812,34 @@ class CompactBubble(Bubble):
             quota=QuotaSatellite(self.windows,self.quota_caption);quota.clicked.connect(self.toggle_details)
             quota.resetDue.connect(self._quota_reset_due);row.addWidget(quota)
         self.add(cluster);self._redrawing=False;self._fit_height()
-        owner=self.parentWidget()
-        if self.enabled and (owner is None or owner.isVisible()):self.show()
-        elif owner is None or owner.isVisible():self.size_transition.dismiss()
+        owner=self.owner_pet()
+        if self.enabled and self.host_visible():self.show()
+        elif self.host_visible():self.size_transition.dismiss()
+        else:self.hide()
+        self._position_now()
+    def _redraw_minimal(self):
+        from island_widgets import MinimalQuota
+        self._redrawing=True;self.clear();self.details_tabs=None;self.status_view.animation.stop();self.status_view.hide()
+        self.quota_refresh_button=None;self.reset_refresh_buttons=[];self.token_refresh_buttons=[]
+        self.layout.setContentsMargins(0,0,0,0);self.layout.setSpacing(0);self.content.setFixedWidth(68)
+        self.minimal_quota=MinimalQuota(self.windows,self.quota_caption,self)
+        self.minimal_quota.clicked.connect(lambda:self.set_mode('auto'));self.minimal_quota.resetDue.connect(self._quota_reset_due)
+        self.add(self.minimal_quota);self._redrawing=False;self._fit_height()
+        if self.enabled and self.host_visible():self.show()
+        elif self.host_visible():self.size_transition.dismiss()
         else:self.hide()
         self._position_now()
     def _status_height_changed(self):
-        if not self._redrawing and self.panel_page=='status':self._fit_height()
+        if not self._redrawing and self.panel_page=='status':
+            r=self.report;scroller=self.status_view
+            if r and r.requested and not r._animating and not self.size_transition.running and not self.size_transition.preparing:
+                if not r.follow.active and scroller.animation.state()==QAbstractAnimation.State.Running and scroller._to_height!=scroller._from_height:
+                    target=self.content_geometry(QSize(self.content.width(),self.height()+scroller._to_height-scroller._from_height))
+                    r.follow.begin_status(target)
+            self._fit_height()
+            if r:r.follow.track_status(self.geometry(),scroller.progress)
+    def _status_height_finished(self):
+        if self.report:self.report.follow.finish_status()
     def _fit_height(self):
         if self.size_transition.running:return
         if self._fitting_height:return
@@ -817,7 +850,7 @@ class CompactBubble(Bubble):
             widget=self.layout.itemAt(i).widget();widget.ensurePolished()
             h=widget.heightForWidth(inner) if widget.hasHeightForWidth() else widget.sizeHint().height()
             wanted+=min(widget.maximumHeight(),max(widget.minimumSizeHint().height(),h,widget.minimumHeight()))
-        owner=self.parentWidget()
+        owner=self.owner_pet()
         if self.details_tabs and owner:
             screen=QApplication.screenAt(owner.frameGeometry().center()) or QApplication.primaryScreen()
             area=screen.availableGeometry()
@@ -829,11 +862,12 @@ class CompactBubble(Bubble):
         self.layout.activate();self._fitting_height=False;self._position_now()
     def _position_now(self):
         if self.size_transition.running or self.size_transition.preparing or self.size_transition.landing.image is not None:return
-        owner=self.parentWidget()
+        owner=self.owner_pet()
         if owner and getattr(owner,'enhanced_ready',False):owner.position_bubble()
-    def content_geometry(self):
-        owner=self.parentWidget();size=self.content.size()
+    def content_geometry(self,size=None):
+        owner=self.owner_pet();size=self.content.size() if size is None else size
         if owner is None:return QRectF(self.x(),self.y(),size.width(),size.height()).toRect()
+        if hasattr(owner,'card_geometry') and not owner.settings.get('character_visible',True):return owner.card_geometry(size)
         screen=QApplication.screenAt(owner.frameGeometry().center()) or QApplication.primaryScreen();area=screen.availableGeometry()
         if self.panel_page!='status' and self._editor_positioned:x,y=self.x(),self.y()
         else:
@@ -852,7 +886,7 @@ class CompactBubble(Bubble):
         p=QPainter(self);p.setRenderHint(QPainter.RenderHint.Antialiasing)
         p.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source);p.fillRect(self.rect(),Qt.GlobalColor.transparent)
         p.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
-        if not self.isVisible() or self.is_island() or self.size_transition.canvas_morph:return
+        if not self.isVisible() or self.is_compact() or self.size_transition.canvas_morph or self.size_transition.preparing:return
         p.setBrush(QColor('#fcfafc'));p.setPen(QPen(QColor('#e0d9e6'),1))
         p.drawRoundedRect(QRectF(self.rect()).adjusted(.5,.5,-.5,-.5),PANEL_RADIUS,PANEL_RADIUS)
     def resizeEvent(self,event):
@@ -867,3 +901,28 @@ class CompactBubble(Bubble):
         self._editing_flags(self.panel_page!='status')
     def message(self,text):self.is_quota_result=False;self.status=clean_text(text,180);self.refresh_status()
     def quota(self,windows):self.windows=windows;self.redraw()
+    def contextMenuEvent(self,event):
+        owner=self.owner_pet()
+        if owner and hasattr(owner,'context_menu'):owner.context_menu(event.globalPos());event.accept()
+        else:super().contextMenuEvent(event)
+    def card_pointer_press(self,event):
+        owner=self.owner_pet()
+        if event.button()==Qt.MouseButton.LeftButton and owner and not owner.settings.get('character_visible',True) and not self.size_transition.running:
+            self._card_press=(event.globalPosition().toPoint(),self.pos());self._card_dragged=False;return True
+        return False
+    def card_pointer_move(self,event):
+        if self._card_press and event.buttons()&Qt.MouseButton.LeftButton:
+            point,start=self._card_press;delta=event.globalPosition().toPoint()-point
+            if delta.manhattanLength()>5 or self._card_dragged:
+                self._card_dragged=True;owner=self.owner_pet();owner.move_card(start+delta);return True
+        return False
+    def card_pointer_release(self):
+        dragged=self._card_dragged;self._card_press=None;self._card_dragged=False
+        if dragged:self.owner_pet().save_settings()
+        return dragged
+    def mousePressEvent(self,event):
+        if not self.card_pointer_press(event):super().mousePressEvent(event)
+    def mouseMoveEvent(self,event):
+        if not self.card_pointer_move(event):super().mouseMoveEvent(event)
+    def mouseReleaseEvent(self,event):
+        if not self.card_pointer_release():super().mouseReleaseEvent(event)

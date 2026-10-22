@@ -66,7 +66,9 @@ class CoreTests(unittest.TestCase):
             self.assertLessEqual(player.frames.qsize(),6)
             # A live scale change must never reinterpret old RGBA bytes as a larger buffer.
             pixmap,done=player.advance(512);self.assertEqual(pixmap.width(),128)
-            thread=player.thread;player.close();self.assertFalse(thread.is_alive())
+            thread=player.thread;player.close()
+            from decode_runtime import STATS
+            self.assertTrue(STATS.drain());self.assertFalse(thread.is_alive())
     def test_import_validation_rejects_escaping_paths(self):
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder);(root/'素材清单.json').write_text(json.dumps(dict(idle=dict(id='a',file='../escape.gif'),variants=[])))

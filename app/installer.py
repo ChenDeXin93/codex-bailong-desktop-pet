@@ -22,8 +22,9 @@ def write_manifest(value,root=ROOT):
     root.mkdir(parents=True,exist_ok=True);temp=root/'installations.tmp'
     temp.write_text(json.dumps(value,ensure_ascii=False,indent=2),encoding='utf-8');os.replace(temp,root/'installations.json')
 def checked_version(root,name):
-    path=(root/'versions'/name).resolve()
-    if path.parent!=(root/'versions').resolve() or not (path/'BailongEnhanced.exe').is_file():raise ValueError('安装版本目录无效')
+    from deployment_state import owned_destination
+    path=owned_destination(root,name)
+    if not (path/'BailongEnhanced.exe').is_file():raise ValueError('安装版本目录无效')
     return path
 def ps_string(value):return "'"+str(value).replace("'","''")+"'"
 def register(exe,maintenance,startup):
@@ -45,7 +46,7 @@ def register(exe,maintenance,startup):
         for name,value in dict(DisplayName='白龙桌宠增强版',DisplayVersion=exe.parent.name.split('-')[0],Publisher='本地白龙桌宠项目',InstallLocation=str(ROOT),UninstallString='"'+str(maintenance)+'" --manage').items():winreg.SetValueEx(key,name,0,winreg.REG_SZ,value)
         winreg.SetValueEx(key,'NoModify',0,winreg.REG_DWORD,1)
 
-def install(payload,root=ROOT,startup=True,copy_installer=True,before_commit=None,old_running=None):
+def install(payload,root=ROOT,startup=True,copy_installer=True,before_commit=None,old_running=None,populate=None):
     from deployment_state import capture_entries,restore_entries,owned_destination,atomic,recover,verify_payload,stop_version
     root=Path(root).resolve();root.mkdir(parents=True,exist_ok=True);system=root==ROOT.resolve()
     recover(root,system)
@@ -57,15 +58,17 @@ def install(payload,root=ROOT,startup=True,copy_installer=True,before_commit=Non
         snapshot=capture_entries(root,system)
         journal=dict(phase='extracting',new_version=name,snapshot=snapshot,old_running=Path(old_running).parent.name if old_running else '')
         atomic(root/'deployment-journal.json',journal)
-        with zipfile.ZipFile(payload) as archive:
-            for member in archive.infolist():
-                target=(dest/member.filename).resolve()
-                if not target.is_relative_to(dest) or stat.S_ISLNK(member.external_attr>>16):raise ValueError('安装包路径无效')
-            archive.extractall(dest)
+        if populate is not None:populate(dest)
+        else:
+            with zipfile.ZipFile(payload) as archive:
+                for member in archive.infolist():
+                    target=(dest/member.filename).resolve()
+                    if not target.is_relative_to(dest) or stat.S_ISLNK(member.external_attr>>16):raise ValueError('安装包路径无效')
+                archive.extractall(dest)
         exe=checked_version(root,name)/'BailongEnhanced.exe';verify_payload(dest,VERSION)
         manifest=read_manifest(root);manifest['versions'].insert(0,name);manifest['current']=name
         maintenance=dest/'白龙安装管理.exe'
-        if copy_installer and getattr(sys,'frozen',False):shutil.copy2(exe,maintenance)
+        if copy_installer and (getattr(sys,'frozen',False) or populate is not None):shutil.copy2(exe,maintenance)
         from shared_assets import share
         def register_shared(sha):
             journal.setdefault('new_shared_objects',[]).append(sha);atomic(root/'deployment-journal.json',journal)
@@ -125,7 +128,7 @@ def stop_existing(root=ROOT):
     if alive:raise OSError('旧桌宠尚未退出，请退出后重试；已有文件和设置未改动。')
     return old
 
-def deploy(payload,startup,root=ROOT,progress=lambda text:None):
+def deploy(payload,startup,root=ROOT,progress=lambda text:None,populate=None,after_stop=None):
     from deployment_state import recover,atomic,wait_ready
     root=Path(root).resolve();recover(root,root==ROOT.resolve())
     progress('正在关闭旧桌宠…');old=stop_existing(root)
@@ -141,8 +144,11 @@ def deploy(payload,startup,root=ROOT,progress=lambda text:None):
         ready_receipt.unlink(missing_ok=True)
         progress('启动检查通过，正在更新入口…')
         return ready
-    progress('正在解压与校验程序及素材…')
-    try:return install(payload,root=root,startup=startup,before_commit=launch_and_confirm,old_running=old)
+    progress('正在暂存与校验程序及素材…')
+    try:
+        if after_stop:after_stop(old)
+        options=dict(populate=populate) if populate is not None else {}
+        return install(payload,root=root,startup=startup,before_commit=launch_and_confirm,old_running=old,**options)
     except Exception as error:
         if old:
             try:subprocess.Popen([str(old)],cwd=str(old.parent),creationflags=0x08000000)

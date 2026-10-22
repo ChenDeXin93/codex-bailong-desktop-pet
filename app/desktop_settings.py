@@ -56,11 +56,15 @@ class SettingsDialog(QDialog):
         self.field_tabs['startup']=self.tabs.count()-1;self.field_titles['startup']='开机启动'
         self.startup.toggled.connect(lambda:self.edited('startup'))
         self.number(appearance,'scale','角色大小（倍）',.4,2.5,.1)
-        for key,title in [('on_top','始终置顶'),('video_fullscreen_yield','视频全屏时临时取消置顶（完成提醒优先）'),('mouse_through','鼠标穿透（从托盘找回）'),('bubble','显示头顶气泡'),('quota_visible','显示额度和重置时间'),('commentary','展示 Codex 回复摘要')]:
+        for key,title in [('character_visible','显示人物（关闭后仅保留独立卡片）'),('on_top','始终置顶'),('video_fullscreen_yield','视频全屏时临时取消置顶（完成提醒优先）'),('mouse_through','鼠标穿透（从托盘找回）'),('bubble','显示状态卡片'),('quota_visible','显示额度和重置时间'),('commentary','展示 Codex 回复摘要')]:
             self.check(appearance,key,title)
             if key=='video_fullscreen_yield':
                 note=QLabel('完成提醒确认后，视频仍全屏则继续让位；退出全屏恢复当前置顶设置。')
                 note.setWordWrap(True);note.setStyleSheet(f'font-size:10px;color:{MUTED};');appearance.addRow(note)
+        self.mode=QComboBox();self.mode.addItem('自动：正常卡片 / 闲置时胶囊','auto');self.mode.addItem('胶囊：状态和快捷圆','mini');self.mode.addItem('极简：仅额度百分比','minimal')
+        appearance.addRow('卡片显示模式',self.mode);self.fields['bubble_mode']=self.mode;self.field_tabs['bubble_mode']=0;self.field_titles['bubble_mode']='卡片显示模式'
+        self.mode.currentIndexChanged.connect(lambda:self.edited('bubble_mode'))
+        note=QLabel('仅卡片时可拖动空白处或极简圆；点击极简圆回到正常卡片，右键可切换显示模式。人物隐藏后暂停动画，Codex 联动继续。');note.setWordWrap(True);appearance.addRow(note)
         behavior=self.tab('动作与陪伴')
         self.section(behavior,'人物行为','先选择陪伴方式，再按需展开高级参数。')
         self.check(behavior,'no_move','锁定人物位置（禁止拖动和自主走动）')
@@ -72,11 +76,11 @@ class SettingsDialog(QDialog):
         self.check(behavior,'self_talk','启用自言自语（自动台词无声）')
         self.advanced_button=QPushButton('展开高级参数与台词');self.advanced_button.setCheckable(True);behavior.addRow(self.advanced_button)
         advanced=QWidget();advanced_form=QFormLayout(advanced);advanced_form.setContentsMargins(0,0,0,0)
-        self.number(advanced_form,'status_action_interval','状态动作检查间隔（秒）',8,120,1)
+        self.number(advanced_form,'status_action_interval','单次状态动作重复间隔（秒）',8,120,1)
         self.check(advanced_form,'drag_physics','拖拽松手后启用惯性与反弹')
         for key,title,lo,hi,step in [('playback_speed','播放速度（倍）',.25,3,.25),('action_gap','动作结束后等待（秒）',0,60,1),('random_interval','自主动作间隔（秒）',3,600,1),('move_speed','自主走动速度（像素/秒）',10,300,5)]:self.number(advanced_form,key,title,lo,hi,step)
         self.number(advanced_form,'move_range','自主活动范围',.1,1,.1,factor=100,suffix='% 屏幕')
-        note=QLabel('状态动作在当前动画播完后检查；工作动作默认每12秒检查续播，播完至少休息2秒。普通装饰动作一分钟内不重复。完成消息立即提醒，庆祝等待安全边界。');note.setWordWrap(True);note.setStyleSheet('font-size:10px;color:#706879;');behavior.addRow(note)
+        note=QLabel('思考/阅读和处理任务在状态稳定1.5秒后进入，保持中段循环，状态改变后自然收尾。其他动作完整播放并按间隔检查。完成消息立即提醒，庆祝等待安全边界。');note.setWordWrap(True);note.setStyleSheet('font-size:10px;color:#706879;');behavior.addRow(note)
         self.check(advanced_form,'talk_quiet','Codex 工作时不自言自语')
         self.number(advanced_form,'talk_min','台词最短间隔（秒）',5,3600,5);self.number(advanced_form,'talk_max','台词最长间隔（秒）',5,7200,5)
         self.lines=QPlainTextEdit();self.lines.setMaximumHeight(100);self.lines.setPlaceholderText('每行一句，自动台词不会播放声音');advanced_form.addRow('自定义台词',self.lines)
@@ -113,6 +117,10 @@ class SettingsDialog(QDialog):
         self.connection_text.setPlainText('点击“检测连接与额度”生成只读报告；不会发送对话或消耗 Token。');paths.addRow(self.connection_text)
         self.paths_card=AnimatedDisclosure(path_body);connection.addRow(self.paths_card);self.path_toggle.toggled.connect(self.paths_card.set_expanded)
         library=self.tab('角色与动作')
+        if hasattr(pet,'materials'):
+            self.section(library,'内置白龙画质','素材与程序独立；下载和切换立即执行，不属于设置草稿。')
+            from material_controller import MaterialPanel
+            self.material_panel=MaterialPanel(pet.materials);library.addRow(self.material_panel)
         self.section(library,'角色资源','切换、导入和预览立即执行；预览始终静音。')
         self.characters=QComboBox();library.addRow('当前角色',self.characters)
         button=QPushButton('切换到所选角色');button.clicked.connect(self.switch_character);library.addRow(button)
@@ -200,6 +208,7 @@ class SettingsDialog(QDialog):
         self._writing_widgets=True
         for key,widget in self.fields.items():
             if isinstance(widget,QCheckBox):widget.setChecked(settings.get(key,DEFAULTS[key]))
+            elif isinstance(widget,QComboBox):widget.setCurrentIndex(widget.findData(settings.get(key,DEFAULTS[key])))
             else:widget.setValue(settings.get(key,DEFAULTS[key])*self.factors.get(key,1))
         lines='\n'.join(settings.get('talk_lines',DEFAULTS['talk_lines']))
         current=[line.strip() for line in self.lines.toPlainText().splitlines() if line.strip()]
@@ -223,7 +232,7 @@ class SettingsDialog(QDialog):
         if key=='startup':value=self.startup.isChecked()
         elif key=='talk_lines':value=[line.strip() for line in self.lines.toPlainText().splitlines() if line.strip()]
         else:
-            widget=self.fields[key];value=widget.isChecked() if isinstance(widget,QCheckBox) else widget.value()/self.factors.get(key,1)
+            widget=self.fields[key];value=widget.isChecked() if isinstance(widget,QCheckBox) else widget.currentData() if isinstance(widget,QComboBox) else widget.value()/self.factors.get(key,1)
         self.draft.set(key,value);self.status.clear();self.update_draft_state()
     def update_draft_state(self,*args):
         if self.draft is None:return

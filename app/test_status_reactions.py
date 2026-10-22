@@ -93,6 +93,7 @@ class IntegrationTests(unittest.TestCase):
         self.assertIs(self.pet.current,current);self.assertEqual(self.pet.mode,'variant')
         self.boundary(clock+4.5);self.assertEqual(self.pet.mode,'idle')
         self.pet.on_activity(status(state='responding',text='正在回复'))
+        self.pet.continuous.target(self.pet.reactions,clock+11)
         with patch('pet.Pet.play_click_sound') as sound,patch.object(self.pet,'refresh_quota') as quota:
             self.boundary(clock+14);self.assertEqual(self.pet.mode,'reaction');self.assertEqual(self.pet.current['id'],'01');sound.assert_not_called();quota.assert_not_called()
     def test_completion_notification_is_immediate_but_celebration_waits(self):
@@ -105,6 +106,7 @@ class IntegrationTests(unittest.TestCase):
     def test_reaction_does_not_rewrite_status_or_query_quota_and_setting_can_disable(self):
         clock=time.monotonic();self.pet.reactions=StatusReactions(clock);self.pet.on_activity(status(state='thinking'))
         text=self.pet.bubble.status
+        self.pet.continuous.target(self.pet.reactions,clock+1)
         with patch.object(self.pet,'refresh_quota') as quota,patch('pet.Pet.play_click_sound') as sound:
             self.boundary(clock+10);self.assertEqual(self.pet.current['id'],'quota');self.assertEqual(self.pet.mode,'reaction');quota.assert_not_called();sound.assert_not_called()
         self.assertEqual(self.pet.bubble.status,text)

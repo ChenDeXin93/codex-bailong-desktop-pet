@@ -406,7 +406,36 @@
       "playbackFile": "quality-v3/work02.webp",
       "originalPlaybackFile": "工作02-处理任务/工作02-处理任务-透明.webp",
       "originalDurationMs": 6042,
-      "qualityRevision": 3
+      "qualityRevision": 3,
+      "sustained": {
+        "start": 55,
+        "end": 83,
+        "seamFile": "quality-v5/work02-seam-0.webp",
+        "seamFrames": 9,
+        "sourceFrames": 163,
+        "variants": [
+          {
+            "start": 55,
+            "end": 83,
+            "seamFile": "quality-v5/work02-seam-0.webp",
+            "seamFrames": 9
+          },
+          {
+            "start": 51,
+            "end": 83,
+            "seamFile": "quality-v5/work02-seam-1.webp",
+            "seamFrames": 13
+          },
+          {
+            "start": 53,
+            "end": 83,
+            "seamFile": "quality-v5/work02-seam-2.webp",
+            "seamFrames": 11
+          }
+        ],
+        "revision": 2,
+        "forwardOnly": true
+      }
     },
     {
       "id": "work03",
@@ -442,7 +471,36 @@
       "playbackFile": "quality-v3/work04.webp",
       "originalPlaybackFile": "工作04-翻阅工作资料/工作04-翻阅工作资料-透明.webp",
       "originalDurationMs": 5042,
-      "qualityRevision": 3
+      "qualityRevision": 3,
+      "sustained": {
+        "start": 44,
+        "end": 85,
+        "seamFile": "quality-v5/work04-seam-0.webp",
+        "seamFrames": 9,
+        "sourceFrames": 139,
+        "variants": [
+          {
+            "start": 44,
+            "end": 85,
+            "seamFile": "quality-v5/work04-seam-0.webp",
+            "seamFrames": 9
+          },
+          {
+            "start": 40,
+            "end": 85,
+            "seamFile": "quality-v5/work04-seam-1.webp",
+            "seamFrames": 13
+          },
+          {
+            "start": 42,
+            "end": 85,
+            "seamFile": "quality-v5/work04-seam-2.webp",
+            "seamFrames": 11
+          }
+        ],
+        "revision": 2,
+        "forwardOnly": true
+      }
     },
     {
       "id": "work05",

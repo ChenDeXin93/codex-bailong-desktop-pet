@@ -105,7 +105,10 @@ def validate_character(root):
         if groups['landing']:manifest['landingAnimation']=groups['landing'][0]
     if not isinstance(manifest.get('idle'),dict):raise ValueError('角色包需要 idle 待机素材')
     manifest.setdefault('variants',[])
-    items=all_items(manifest)
+    from sustained_assets import seam_items,profile_paths
+    items=all_items(manifest)+seam_items(manifest)
+    for item in manifest.get('workAnimations',[]):
+        if item.get('sustained'):profile_paths(root,item)
     if len(items)>500:raise ValueError('每个角色最多导入500段素材')
     for item in items:
         name=item.get('playbackFile') or item.get('file','')
@@ -132,7 +135,7 @@ def import_character(source,destination):
     stage=Path(tempfile.mkdtemp(prefix='import-',dir=dest.parent))
     try:
         converted={}
-        for item in all_items(manifest):
+        for item in all_items(manifest)+__import__('sustained_assets').seam_items(manifest):
             name=item.get('playbackFile') or item['file'];src=checked_path(source,name)
             target=stage/name;target.parent.mkdir(parents=True,exist_ok=True)
             if src.suffix.lower()=='.webm':
