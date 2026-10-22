@@ -1,6 +1,6 @@
 # 开发与构建
 
-Windows x64，Python 3.11或3.12。先安装 requirements-enhanced.txt，所有命令从仓库根目录执行。原项目与授权边界见根目录 NOTICE.md。
+Windows x64，Python 3.12（当前本地冻结环境为3.12.14）。先安装 requirements-enhanced.txt，所有命令从仓库根目录执行。原项目与授权边界见根目录 NOTICE.md。
 
 ## 准备动画
 
