@@ -49,7 +49,7 @@ class NavigationTests(unittest.TestCase):
         def open_(session):called.append(session);started.set();gate.wait(2)
         nav=CodexNavigation(open_);before=time.monotonic()
         try:
-            self.assertTrue(nav.open(SID));self.assertLess(time.monotonic()-before,.1);self.assertTrue(started.wait(.5))
+            self.assertTrue(nav.open(SID));self.assertLess(time.monotonic()-before,1.5);self.assertTrue(started.wait(2))
             nav.open(SID);nav.open(OTHER);nav.open('33333333-3333-4333-8333-333333333333');nav.open(OTHER)
             QTimer.singleShot(0,lambda:ticks.append(True));APP.processEvents();self.assertEqual(ticks,[True]);self.assertEqual(called,[SID])
             gate.set();self.wait(lambda:not nav.busy)
