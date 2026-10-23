@@ -1,4 +1,4 @@
-"""Bailong 0.3.3 local enhancement. Keeps original animation assets and renderer."""
+"""Bailong desktop companion with Codex status and account data."""
 import ctypes
 import json
 import math
@@ -22,7 +22,7 @@ from PySide6.QtNetwork import QLocalServer, QLocalSocket
 
 from pet import Pet, Bubble, ROOT, QuotaWorker
 from enhanced_core import RolloutTail, motion_step, clean_text, windows_from_limits
-from reset_watch import ResetTracker, fetch_feed, schedule_text, account_reset_text, SOURCE_URL, local_time
+from reset_watch import LocalResetEvidence, locally_reset, ResetTracker, fetch_feed, schedule_text, account_reset_text, SOURCE_URL, local_time
 from token_calendar import TokenUsageIndex
 from refresh_flow import RefreshCoordinator, RefreshRuns
 
@@ -227,6 +227,7 @@ class EnhancedPet(Pet):
         self.sound=self.settings.get('sound',True)
         self._interaction_sound=False
         self.silent_notifier=None
+        self.local_reset_evidence=LocalResetEvidence(STATE_DIR/'local-reset-evidence.json')
         self.quota_windows=[]
         self.quota_observed=0
         self.quota_source=''
@@ -467,6 +468,8 @@ class EnhancedPet(Pet):
 
     def update_quota(self,windows,observed,source):
         if source=='session' and observed<self.quota_observed:return
+        self.local_reset_evidence.observe(windows,observed,source)
+        self.bubble.reset_snapshot=self.local_reset_evidence.decorate(self.bubble.reset_snapshot)
         self.quota_windows=windows
         self.quota_observed=observed
         self.quota_source=source
@@ -558,6 +561,8 @@ class EnhancedPet(Pet):
             self.render_quota()
 
     def on_reset_feed(self,snapshot,alerts,fresh):
+        snapshot=self.local_reset_evidence.decorate(snapshot)
+        if locally_reset(snapshot):alerts=[a for a in alerts if a.get('kind')!='scheduled']
         self.bubble.reset_snapshot=snapshot
         if fresh:self.bubble.reset_feed_error=False
         self.reset_checked=snapshot.get('checked',0)
@@ -768,6 +773,7 @@ def main():
                 destination=Path(sys.argv[index+1]);destination.parent.mkdir(parents=True,exist_ok=True);save_json(destination,report)
         return 0
     app=QApplication(sys.argv)
+    app.setWindowIcon(QIcon(str(ROOT/'app/branding/bailong.ico')))
     from typography import install_ui_font
     install_ui_font(app)
     app.setQuitOnLastWindowClosed(False)

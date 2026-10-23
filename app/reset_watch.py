@@ -65,6 +65,50 @@ def pending_reset(snapshot):
     """Old cache compatibility; a passed deadline alone never resolves an announcement."""
     return (snapshot or {}).get('pending',(snapshot or {}).get('scheduled'))
 
+def locally_reset(snapshot):
+    pending=pending_reset(snapshot);record=(snapshot or {}).get('local_reset')
+    return bool(pending and isinstance(record,dict) and record.get('schedule')==schedule_key(pending))
+
+def reset_has_priority(snapshot):
+    return bool(pending_reset(snapshot) and not locally_reset(snapshot))
+
+class LocalResetEvidence:
+    """Persist live account observations separately from the public-feed worker."""
+    def __init__(self,path):
+        self.path=Path(path)
+        try:
+            self.state=json.loads(self.path.read_text(encoding='utf-8'))
+            if not isinstance(self.state,dict):raise ValueError()
+        except (OSError,ValueError):self.state={}
+    def observe(self,windows,observed,source):
+        if source!='live' or not isinstance(observed,(int,float)) or not math.isfinite(observed):return
+        old=self.state.get('window');window=next((w for w in windows if w.get('name')=='一周'),None)
+        if window is None:window=next((w for w in windows if w.get('name')=='5小时'),None)
+        if window is None:return
+        value=window.get('remaining')
+        if isinstance(value,bool) or not isinstance(value,(int,float)) or not math.isfinite(value) or not 0<=value<=100:return
+        stamp=epoch(window.get('resetsAt'))
+        if isinstance(old,dict) and observed<=old.get('observed',0):return
+        current=dict(name=window['name'],remaining=value,reset=stamp,observed=observed)
+        if isinstance(old,dict) and old.get('name')==window['name']:
+            increase=value-old.get('remaining',value)
+            advanced=stamp and old.get('reset') and stamp>old['reset']+60
+            refilled=value>=99 and increase>=10
+            rolled=advanced and old['reset']<=observed+120
+            if rolled or increase>1 and (advanced or refilled):
+                self.state['reset']=dict(observed=observed,window=window['name'],remaining=value)
+        self.state['window']=current
+        from desktop_core import atomic_json
+        try:atomic_json(self.path,self.state)
+        except OSError:pass  # Keep valid in-memory evidence if persistence is unavailable.
+    def decorate(self,snapshot):
+        if snapshot is None:return None
+        snapshot=dict(snapshot);pending=pending_reset(snapshot);event=self.state.get('reset')
+        if pending and pending.get('reset_type')!='banked' and isinstance(event,dict) and event.get('observed',0)>=pending.get('announced',float('inf')):
+            snapshot['local_reset']=dict(event,schedule=schedule_key(pending))
+        else:snapshot.pop('local_reset',None)
+        return snapshot
+
 def confirms(event,pending):
     return (event.get('reset_type')==pending.get('reset_type') and
             (event.get('id')==pending.get('id') or event.get('announced',0)>=pending.get('announced',0)))
@@ -75,6 +119,7 @@ def schedule_text(snapshot,now=None):
     if not snapshot:return '下轮额外重置：正在查询…'
     if not item:return '下轮额外重置：暂未公布'
     title='备用重置' if item.get('reset_type')=='banked' else '额外重置'
+    if locally_reset(snapshot):return title+'：本机额度已重置 · 公告仍待确认'
     stamp=epoch(item.get('scheduled'))
     if stamp is None:return f'{title}已安排 · 时间待公布'
     if stamp<=now:return f'{title}预计 {local_time(stamp)} · 已过，待确认'
@@ -82,7 +127,7 @@ def schedule_text(snapshot,now=None):
 
 def fetch_feed():
     request=urllib.request.Request(API_URL,headers={
-        'User-Agent':'BailongDesktopPet/0.3.3-local (+https://codex-resets.com)',
+        'User-Agent':'BailongDesktopPet/'+__import__('version').VERSION+' (+https://codex-resets.com)',
         'Accept':'application/json', 'Cache-Control':'no-cache'})
     with urllib.request.urlopen(request,timeout=10) as response:
         raw=response.read(2*1024*1024+1)

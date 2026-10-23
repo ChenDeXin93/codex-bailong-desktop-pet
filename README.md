@@ -2,7 +2,7 @@
 
 ![文章海报](docs/media/cover.png)
 
-一只陪你使用 Codex 的 Windows 白龙桌宠：在桌面查看任务状态、接收完成提醒、追踪账户额度和 Token 用量。基于 [jingh12312-rgb/bailong-desktop-pet](https://github.com/jingh12312-rgb/bailong-desktop-pet) 持续改造，当前版本 **v0.8.3 / UI73**。
+一只陪你使用 Codex 的 Windows 白龙桌宠：在桌面查看任务状态、接收完成提醒、追踪账户额度和 Token 用量。基于 [jingh12312-rgb/bailong-desktop-pet](https://github.com/jingh12312-rgb/bailong-desktop-pet) 持续改造，当前版本 **v0.8.8 / UI77**。
 
 **[下载安装包](https://github.com/Wunsch2048/codex-bailong-desktop-pet/releases/latest)** · [快速部署](docs/快速部署说明.txt) · [全部新增功能](docs/新增功能说明.txt) · [开发说明](docs/DEVELOPMENT.md) · [迭代历史](docs/迭代历史.txt)
 
@@ -28,6 +28,18 @@
 | 胶囊展开正常面板 | 日报展开与收回 |
 | --- | --- |
 | ![胶囊展开](docs/report/assets/胶囊展开正常.gif) | ![日报动效](docs/report/assets/日报展开收回.gif) |
+
+### v0.8.8 更新（设置整理与本机额度重置判断）
+
+- **设置更好找**：按面板、人物、Codex、素材、闲聊和维护分组，补齐当前功能说明与部署指南。
+- **额外重置提示更准确**：确认本机额度周期已重置后，公告自动让位给 Token 卡片；公告仍可手动查看，网站确认状态不被伪造。
+- **桌面入口统一**：应用和快捷方式使用正式白龙图标，升级时仅清理指向本项目受管安装目录的旧入口。
+- **更新检查备用通道**：遇到 GitHub API 限流时尝试受校验的备用下载路径；下载仍由用户主动发起。
+- **程序更新与首次安装**：发布包含完整安装 ZIP，以及供已支持客户端使用的程序更新包。
+
+本次通过 74 个模块、758 项隔离回归及四档 DPI 原生交互验收。公网备用通道的实际网络表现仍取决于网络环境。
+
+详见[本次更新说明](docs/releases/v0.8.8.md)和[快速部署](docs/快速部署说明.txt)。
 
 ### v0.8.3 更新（含此前本地迭代的 v0.8.1—v0.8.2）
 

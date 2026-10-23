@@ -18,6 +18,7 @@ def source_hashes():
     paths=list((ROOT/'app').glob('*.py'))
     paths += [ROOT/name for name in ('build_local.py','quality_check.py','build_release.py','check_bundle.py','deploy_release.py','release_version.py','release_retention.py','asset_pack.py','build_materials.py','build_program_update.py','package_trim.py','test_local_workflow.py','test_release_version.py','test_release_retention.py') if (ROOT/name).is_file()]
     if (ROOT/'app/material_catalog.json').is_file():paths.append(ROOT/'app/material_catalog.json')
+    paths += list((ROOT/'app/branding').glob('*.ico'))
     manifest=ROOT/'outputs/白龙桌宠素材/素材清单.json'
     if manifest.is_file():
         paths.append(manifest)
@@ -64,6 +65,7 @@ def snapshot_source():
     dest=ROOT/'本地实装/源码快照'/(VERSION+'-'+time.strftime('%Y%m%d-%H%M%S'));dest.mkdir(parents=True)
     files=[p for p in (ROOT/'app').glob('*.py') if not p.name.startswith(('test_','qa_'))]
     files += [ROOT/p for p in ('build_local.py','quality_check.py','build_release.py','check_bundle.py','deploy_release.py','release_version.py','package_trim.py','asset_pack.py','build_materials.py','build_program_update.py','app/material_catalog.json','AGENTS.md','app/book_catalog.json','outputs/白龙桌宠素材/素材清单.json')]
+    files += list((ROOT/'app/branding').glob('*.ico'))
     records={}
     for path in files:
         relative=path.relative_to(ROOT);target=dest/relative;target.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(path,target);records[relative.as_posix()]=sha(target)

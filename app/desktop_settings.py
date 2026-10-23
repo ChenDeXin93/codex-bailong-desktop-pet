@@ -50,21 +50,15 @@ class SettingsDialog(QDialog):
         if embedded:self.setWindowFlags(Qt.WindowType.Widget)
         self.setWindowTitle('白龙桌宠 · 设置');self.resize(590,680)
         outer=QVBoxLayout(self);self.tabs=QTabWidget();outer.addWidget(self.tabs,1)
-        appearance=self.tab('常规与外观')
-        self.section(appearance,'桌面与显示','这里的偏好点击“应用”后生效；切页会保留草稿。')
-        self.startup=QCheckBox('登录 Windows 时启动');appearance.addRow(self.startup)
-        self.field_tabs['startup']=self.tabs.count()-1;self.field_titles['startup']='开机启动'
-        self.startup.toggled.connect(lambda:self.edited('startup'))
-        self.codex_startup=QCheckBox('打开 Codex 时自动启动桌宠');appearance.addRow(self.codex_startup)
-        self.field_tabs['codex_startup']=0;self.field_titles['codex_startup']='随 Codex 启动'
-        self.codex_startup.toggled.connect(lambda:self.edited('codex_startup'))
-        note=QLabel('登录时运行轻量监听；识别 Codex 桌面端，不依赖 Codex++。手动退出桌宠后，本次 Codex 使用期间不再拉起。关闭 Codex 不会强制退出桌宠。');note.setWordWrap(True);note.setStyleSheet(f'font-size:10px;color:{MUTED};');appearance.addRow(note)
-        self.number(appearance,'scale','角色大小（倍）',.4,2.5,.1)
-        for key,title in [('character_visible','显示人物（关闭后仅保留独立卡片）'),('on_top','始终置顶'),('video_fullscreen_yield','视频全屏时临时取消置顶（完成提醒优先）'),('mouse_through','鼠标穿透（从托盘找回）'),('bubble','显示状态卡片'),('quota_visible','显示额度和重置时间'),('commentary','展示 Codex 回复摘要')]:
+        appearance=self.tab('面板与显示')
+        self.section(appearance,'显示哪些内容','勾选与数值点击“应用”后生效；切页保留草稿。')
+        self.check(appearance,'panel_detached','面板与人物分离（人物走动时面板固定，可单独拖动面板）')
+        for key,title in [('character_visible','显示人物（关闭后仅保留独立卡片）'),('on_top','始终置顶'),('video_fullscreen_yield','视频全屏时临时取消置顶（完成提醒优先）'),('mouse_through','鼠标穿透（从托盘找回）'),('bubble','显示面板（关闭后仅保留人物）'),('quota_visible','显示额度和重置时间')]:
             self.check(appearance,key,title)
             if key=='video_fullscreen_yield':
                 note=QLabel('完成提醒确认后，视频仍全屏则继续让位；退出全屏恢复当前置顶设置。')
                 note.setWordWrap(True);note.setStyleSheet(f'font-size:10px;color:{MUTED};');appearance.addRow(note)
+        self.section(appearance,'卡片与快捷入口','自动模式闲置后收为胶囊；手动选择胶囊或极简后不会因新状态自动展开。')
         self.mode=QComboBox();self.mode.addItem('自动：正常卡片 / 闲置时胶囊','auto');self.mode.addItem('胶囊：状态和快捷圆','mini');self.mode.addItem('极简：仅额度百分比','minimal')
         appearance.addRow('卡片显示模式',self.mode);self.fields['bubble_mode']=self.mode;self.field_tabs['bubble_mode']=0;self.field_titles['bubble_mode']='卡片显示模式'
         self.mode.currentIndexChanged.connect(lambda:self.edited('bubble_mode'))
@@ -77,30 +71,39 @@ class SettingsDialog(QDialog):
         appearance.addRow('自定义网页地址',self.website);self.fields['capsule_website']=self.website;self.field_tabs['capsule_website']=0;self.field_titles['capsule_website']='自定义网页地址'
         self.website.textChanged.connect(lambda:self.edited('capsule_website'))
         note=QLabel('仅卡片时可拖动空白处或极简圆；点击极简圆回到正常卡片，右键可切换显示模式。人物隐藏后暂停动画，Codex 联动继续。');note.setWordWrap(True);appearance.addRow(note)
-        behavior=self.tab('动作与陪伴')
-        self.section(behavior,'人物行为','先选择陪伴方式，再按需展开高级参数。')
+        behavior=self.tab('人物与动作')
+        self.section(behavior,'位置与移动','人物锁定仅限制人物；分离后的面板仍可独立拖动。')
+        self.number(behavior,'scale','角色大小（倍）',.4,2.5,.1)
         self.check(behavior,'no_move','锁定人物位置（禁止拖动和自主走动）')
         self.check(behavior,'wandering','允许自主走动（不影响手动拖动）')
         self.movement_note=QLabel();self.movement_note.setWordWrap(True);behavior.addRow(self.movement_note)
+        self.check(behavior,'drag_physics','松手后惯性滑行与反弹')
+        self.section(behavior,'动作与声音','自动动作静音；只在你主动点击或手动播放时使用音效。')
         self.check(behavior,'random_actions','自动随机动作')
-        self.check(behavior,'status_actions','根据 Codex 当前状态播放动作（播完后再切换）')
         self.check(behavior,'sound','主动点击人物或手动动作时播放音效')
-        self.check(behavior,'self_talk','启用自言自语（自动台词无声）')
-        self.advanced_button=QPushButton('展开高级参数与台词');self.advanced_button.setCheckable(True);behavior.addRow(self.advanced_button)
+        self.advanced_button=QPushButton('展开高级动作参数');self.advanced_button.setCheckable(True);behavior.addRow(self.advanced_button)
         advanced=QWidget();advanced_form=QFormLayout(advanced);advanced_form.setContentsMargins(0,0,0,0)
-        self.number(advanced_form,'status_action_interval','单次状态动作重复间隔（秒）',8,120,1)
-        self.check(advanced_form,'drag_physics','拖拽松手后启用惯性与反弹')
         for key,title,lo,hi,step in [('playback_speed','播放速度（倍）',.25,3,.25),('action_gap','动作结束后等待（秒）',0,60,1),('random_interval','自主动作间隔（秒）',3,600,1),('move_speed','自主走动速度（像素/秒）',10,300,5)]:self.number(advanced_form,key,title,lo,hi,step)
         self.number(advanced_form,'move_range','自主活动范围',.1,1,.1,factor=100,suffix='% 屏幕')
-        note=QLabel('思考/阅读和处理任务在状态稳定1.5秒后进入，保持中段循环，状态改变后自然收尾。其他动作完整播放并按间隔检查。完成消息立即提醒，庆祝等待安全边界。');note.setWordWrap(True);note.setStyleSheet('font-size:10px;color:#706879;');behavior.addRow(note)
-        self.check(advanced_form,'talk_quiet','Codex 工作时不自言自语')
-        self.number(advanced_form,'talk_min','台词最短间隔（秒）',5,3600,5);self.number(advanced_form,'talk_max','台词最长间隔（秒）',5,7200,5)
-        self.lines=QPlainTextEdit();self.lines.setMaximumHeight(100);self.lines.setPlaceholderText('每行一句，自动台词不会播放声音');advanced_form.addRow('自定义台词',self.lines)
-        self.field_tabs['talk_lines']=self.tabs.count()-1;self.field_titles['talk_lines']='自定义台词';self.lines.textChanged.connect(lambda:self.edited('talk_lines'))
         self.advanced_card=AnimatedDisclosure(advanced);behavior.addRow(self.advanced_card)
         self.advanced_button.toggled.connect(self.advanced_card.set_expanded)
-        self.advanced_button.toggled.connect(lambda checked:self.advanced_button.setText('收起高级参数与台词' if checked else '展开高级参数与台词'))
-        connection=self.tab('连接与数据')
+        self.advanced_button.toggled.connect(lambda checked:self.advanced_button.setText('收起高级动作参数' if checked else '展开高级动作参数'))
+        connection=self.tab('Codex 联动')
+        self.section(connection,'启动与退出','Windows 登录启动与随 Codex 启动相互独立；按需开启。')
+        self.startup=QCheckBox('登录 Windows 时启动');connection.addRow(self.startup)
+        self.field_tabs['startup']=self.tabs.count()-1;self.field_titles['startup']='开机启动'
+        self.startup.toggled.connect(lambda:self.edited('startup'))
+        self.codex_startup=QCheckBox('打开 Codex 时自动启动桌宠');connection.addRow(self.codex_startup)
+        self.field_tabs['codex_startup']=self.tabs.count()-1;self.field_titles['codex_startup']='随 Codex 启动'
+        self.codex_startup.toggled.connect(lambda:self.edited('codex_startup'))
+        note=QLabel('登录时运行轻量监听；识别 Codex 桌面端，不依赖 Codex++。手动退出桌宠后，本次 Codex 使用期间不再拉起。可另行开启关闭联动。');note.setWordWrap(True);note.setStyleSheet(f'font-size:10px;color:{MUTED};');connection.addRow(note)
+        self.check(connection,'codex_exit','Codex 桌面端关闭后退出桌宠（确认退出后约6秒）')
+        self.section(connection,'状态与人物响应','面板持续更新，人物在安全边界切换；不会逐条打断动作。')
+        self.check(connection,'commentary','显示 Codex 工作过程与回复摘要')
+        self.check(connection,'status_actions','人物响应 Codex 状态')
+        self.number(connection,'status_action_interval','单次状态动作最小间隔（秒）',8,120,1)
+        note=QLabel('思考/阅读和处理任务在状态稳定1.5秒后进入，保持中段循环，状态改变后自然收尾。其他动作完整播放并按间隔检查。完成消息立即提醒，庆祝等待安全边界。');note.setWordWrap(True);note.setStyleSheet('font-size:10px;color:#706879;');connection.addRow(note)
+
         self.section(connection,'Codex 连接健康','各项独立检测；失败不会当作已读、零额度或零用量。')
         self.connection_button=QPushButton('检测连接与额度');self.connection_button.setProperty('role','primary');self.connection_button.clicked.connect(self.check_connection);connection.addRow(self.connection_button)
         self.health_panel=CapabilityPanel();self.health_panel.set_snapshot(pet.connection_health.snapshot());connection.addRow(self.health_panel)
@@ -109,8 +112,6 @@ class SettingsDialog(QDialog):
         for key,title,slot in [('quota','刷新额度',pet.refresh_quota),('reset','刷新重置消息',pet.refresh_reset_feed),('token','刷新 Token',pet.refresh_tokens)]:
             button=QPushButton(title);button.clicked.connect(slot);buttons.addWidget(button);self.refresh_buttons[key]=(button,title)
         connection.addRow(row)
-        self.section(connection,'白龙聊天服务','与 Codex 的只读联动独立；仅主动发送时调用。')
-        button=QPushButton('配置白龙聊天服务…');button.clicked.connect(pet.open_chat_service);connection.addRow(button)
         self.path_toggle=QPushButton('连接路径与检测报告');self.path_toggle.setCheckable(True);connection.addRow(self.path_toggle)
         path_body=QWidget();paths=QFormLayout(path_body);paths.setContentsMargins(0,4,0,4)
         from codex_connection import saved_paths,data_home
@@ -128,7 +129,7 @@ class SettingsDialog(QDialog):
         self.connection_text=QPlainTextEdit();self.connection_text.setReadOnly(True);self.connection_text.setMaximumHeight(140);self.connection_text.setAccessibleName('最近一次连接检测报告')
         self.connection_text.setPlainText('点击“检测连接与额度”生成只读报告；不会发送对话或消耗 Token。');paths.addRow(self.connection_text)
         self.paths_card=AnimatedDisclosure(path_body);connection.addRow(self.paths_card);self.path_toggle.toggled.connect(self.paths_card.set_expanded)
-        library=self.tab('角色与动作')
+        library=self.tab('角色与素材')
         if hasattr(pet,'materials'):
             self.section(library,'内置白龙画质','素材与程序独立；下载和切换立即执行，不属于设置草稿。')
             from material_controller import MaterialPanel
@@ -142,7 +143,16 @@ class SettingsDialog(QDialog):
         button=QPushButton('静音预览所选动作');button.clicked.connect(self.preview);library.addRow(button)
         button=QPushButton('检查所有素材');button.clicked.connect(self.validate);library.addRow(button)
         self.library_status=QLabel();self.library_status.setWordWrap(True);library.addRow(self.library_status)
-        maintenance=self.tab('维护与数据')
+        chat=self.tab('闲聊与台词')
+        self.section(chat,'白龙聊天服务','与 Codex 的只读联动独立；仅主动发送时调用。')
+        button=QPushButton('配置白龙聊天服务…');button.clicked.connect(pet.open_chat_service);chat.addRow(button)
+        self.section(chat,'自动台词','自动台词与主动闲聊相互独立；台词始终无声。')
+        self.check(chat,'self_talk','启用自动台词')
+        self.check(chat,'talk_quiet','Codex 工作时不自言自语')
+        self.number(chat,'talk_min','台词最短间隔（秒）',5,3600,5);self.number(chat,'talk_max','台词最长间隔（秒）',5,7200,5)
+        self.lines=QPlainTextEdit();self.lines.setMaximumHeight(100);self.lines.setPlaceholderText('每行一句，自动台词不会播放声音');chat.addRow('自定义台词',self.lines)
+        self.field_tabs['talk_lines']=self.tabs.count()-1;self.field_titles['talk_lines']='自定义台词';self.lines.textChanged.connect(lambda:self.edited('talk_lines'))
+        maintenance=self.tab('更新与维护')
         self.section(maintenance,'软件更新','检查 GitHub 公开稳定版；下载和安装由你主动发起。')
         self.check(maintenance,'update_checks','自动检查更新（不自动下载）')
         if hasattr(pet,'updates'):
@@ -168,7 +178,7 @@ class SettingsDialog(QDialog):
         pet.bubble.dataBusyChanged.connect(self.update_refresh_state)
         for key in self.refresh_buttons:self.update_refresh_state(key,getattr(pet.bubble,key+'_busy'))
     def section(self,form,title,note):
-        name=QLabel(title);name.setStyleSheet(f'font-size:13px;font-weight:600;color:{PRIMARY};margin-top:3px;');form.addRow(name)
+        name=QLabel(title);name.setStyleSheet(f'font-size:13px;font-weight:600;color:{PRIMARY};background:#eae3f0;border-radius:6px;padding:6px;margin-top:6px;');form.addRow(name)
         label=QLabel(note);label.setWordWrap(True);label.setStyleSheet(f'font-size:10px;color:{MUTED};margin-bottom:3px;');form.addRow(label)
     def choose_path(self,key):
         if key=='home':value=QFileDialog.getExistingDirectory(self,'选择 Codex 数据目录',self.path_fields[key].text())
@@ -192,14 +202,14 @@ class SettingsDialog(QDialog):
     def update_refresh_state(self,key,busy):
         button,title=self.refresh_buttons[key];button.setEnabled(not busy);button.setText('查询中…' if busy else title)
     def tab(self,title):
-        widget=QWidget();form=QFormLayout(widget)
+        widget=QWidget();form=QFormLayout(widget);form.setVerticalSpacing(9);form.setHorizontalSpacing(12)
         if self.embedded:
             widget.setObjectName('settings_category');widget.setStyleSheet('QWidget#settings_category{background:#f5f2f7;}')
             form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
             area=QScrollArea();area.setWidgetResizable(True)
             # Reserve the gutter so opening a disclosure cannot rewrap its body.
             area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn);area.setWidget(widget)
-            index=self.tabs.addTab(area,{'常规与外观':'常规','动作与陪伴':'动作','角色与动作':'角色','维护与数据':'维护','连接与数据':'连接'}.get(title,title))
+            index=self.tabs.addTab(area,{'面板与显示':'面板','人物与动作':'人物','Codex 联动':'Codex','角色与素材':'素材','闲聊与台词':'闲聊','更新与维护':'维护'}.get(title,title))
             self.tabs.setTabToolTip(index,title)
         else:self.tabs.addTab(widget,title)
         return form
@@ -269,7 +279,7 @@ class SettingsDialog(QDialog):
     def defaults(self):
         for key,tab in self.field_tabs.items():
             if tab==self.tabs.currentIndex() and key in DEFAULTS:self.draft.set(key,DEFAULTS[key])
-        self.fill(self.draft.values);self.update_draft_state();self.status.setText('已载入本页默认值，应用后生效；不影响开机启动、角色及聊天服务。')
+        self.fill(self.draft.values);self.update_draft_state();self.status.setText('已载入本页默认值，应用后生效；不影响启动登记、角色资源及聊天服务。')
     def apply(self):
         values=self.draft.changes();startup=values.pop('startup',None);codex_startup=values.pop('codex_startup',None);messages=[]
         if values:

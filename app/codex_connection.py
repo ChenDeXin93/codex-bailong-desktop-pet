@@ -81,7 +81,7 @@ def find_executable():
         path=Path(os.path.expandvars(override)).expanduser()
         located=str(path) if path.is_file() else shutil.which(override)
         if located:return located
-        raise RuntimeError('BAILONG_CODEX 指向的程序不存在，请修正该机器的 Codex CLI 路径。' if os.environ.get('BAILONG_CODEX') else '已保存的 CLI 路径不存在，请在设置 → 连接中重新选择。')
+        raise RuntimeError('BAILONG_CODEX 指向的程序不存在，请修正该机器的 Codex CLI 路径。' if os.environ.get('BAILONG_CODEX') else '已保存的 CLI 路径不存在，请在设置 → Codex中重新选择。')
     local=Path(os.environ.get('LOCALAPPDATA') or Path.home()/'AppData/Local')
     cache=local/'OpenAI/Codex/bin';candidates=list(cache.glob('*/codex.exe')) if cache.is_dir() else []
     if (cache/'codex.exe').is_file():candidates.append(cache/'codex.exe')

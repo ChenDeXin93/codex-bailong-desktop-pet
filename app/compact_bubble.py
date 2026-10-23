@@ -13,7 +13,7 @@ from pet import Bubble
 from enhanced_core import clean_text
 from typography import FONT_FAMILIES,FONT_CSS,ui_font
 from ui_theme import editor_stylesheet,PRIMARY,ACCENT,SELECTED,DISABLED
-from reset_watch import epoch,local_time,schedule_text,account_reset_text,SOURCE_URL,pending_reset,schedule_key
+from reset_watch import epoch,local_time,schedule_text,account_reset_text,SOURCE_URL,pending_reset,schedule_key,locally_reset,reset_has_priority
 
 INK=QColor('#393343');MUTED=QColor('#706879');PURPLE=QColor('#8b78a6')
 GREEN=QColor('#b3a5cb');AMBER=QColor('#915e74');TRACK=QColor('#e4dfea')
@@ -686,9 +686,9 @@ class CompactBubble(Bubble):
             # routine status, quota and token updates preserve manual switching.
             from dashboard_cards import CardDeck,DASH_HEIGHT
             from quota_summary import QuotaSummary,TodayTokens
-            pending=pending_reset(self.reset_snapshot);key=schedule_key(pending) if pending else None
+            pending=pending_reset(self.reset_snapshot);key=(schedule_key(pending),locally_reset(self.reset_snapshot)) if pending else None
             if key!=self._active_reset_key:
-                self.dashboard_page='reset' if pending else 'tokens';self._active_reset_key=key
+                self.dashboard_page='reset' if reset_has_priority(self.reset_snapshot) else 'tokens';self._active_reset_key=key
             container=QWidget();container.setFixedHeight(DASH_HEIGHT+TodayTokens.HEIGHT+2)
             stack=QVBoxLayout(container);stack.setContentsMargins(0,0,0,0);stack.setSpacing(2)
             cards=QWidget();cards.setFixedHeight(DASH_HEIGHT);row=QHBoxLayout(cards);row.setContentsMargins(0,0,0,0);row.setSpacing(6);stack.addWidget(cards)
@@ -846,8 +846,9 @@ class CompactBubble(Bubble):
             room=max(owner.y()-area.top()-8,area.bottom()-owner.y()-owner.height()-7)
             old=self.details_tabs.height();height=max(120,min(244,room-(wanted-old)))
             self.details_tabs.setFixedHeight(height);wanted+=height-old
-        self.content.setFixedHeight(max(40,wanted));self.setAccessibleName(self.heading+'；'+self.status)
-        if not self.size_transition.preparing:self.setFixedSize(self.content.size())
+        if self.content.height()!=max(40,wanted):self.content.setFixedHeight(max(40,wanted))
+        self.setAccessibleName(self.heading+'；'+self.status)
+        if not self.size_transition.preparing and self.size()!=self.content.size():self.setFixedSize(self.content.size())
         self.layout.activate();self._fitting_height=False;self._position_now()
     def _position_now(self):
         if self.size_transition.running or self.size_transition.preparing or self.size_transition.landing.image is not None:return
@@ -856,7 +857,7 @@ class CompactBubble(Bubble):
     def content_geometry(self,size=None):
         owner=self.owner_pet();size=self.content.size() if size is None else size
         if owner is None:return QRectF(self.x(),self.y(),size.width(),size.height()).toRect()
-        if hasattr(owner,'card_geometry') and not owner.settings.get('character_visible',True):return owner.card_geometry(size)
+        if hasattr(owner,'card_geometry') and (owner.settings.get('panel_detached') or not owner.settings.get('character_visible',True)):return owner.card_geometry(size)
         screen=QApplication.screenAt(owner.frameGeometry().center()) or QApplication.primaryScreen();area=screen.availableGeometry()
         if self.panel_page!='status' and self._editor_positioned:x,y=self.x(),self.y()
         else:
@@ -896,7 +897,7 @@ class CompactBubble(Bubble):
         else:super().contextMenuEvent(event)
     def card_pointer_press(self,event):
         owner=self.owner_pet()
-        if event.button()==Qt.MouseButton.LeftButton and owner and not owner.settings.get('character_visible',True) and not self.size_transition.running:
+        if event.button()==Qt.MouseButton.LeftButton and owner and (owner.settings.get('panel_detached') or not owner.settings.get('character_visible',True)) and not self.size_transition.running:
             self._card_press=(event.globalPosition().toPoint(),self.pos());self._card_dragged=False;return True
         return False
     def card_pointer_move(self,event):

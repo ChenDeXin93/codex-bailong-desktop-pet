@@ -96,6 +96,26 @@ def ensure_checksum(release,opener=open_url,cancel=lambda:False):
     if not found:raise UpdateError('安装包校验值缺失，暂不能在应用内安装')
     return replace(release,sha256=found)
 
+def release_without_api(opener=open_url,cancel=lambda:False):
+    """Same repository and SHA verification through GitHub's web/download channel."""
+    sums=read_small('https://github.com/'+REPOSITORY+'/releases/latest/download/SHA256SUMS.txt',65536,opener,cancel).decode('utf-8-sig')
+    candidates=[]
+    for line in sums.splitlines():
+        match=re.fullmatch(r'([0-9a-fA-F]{64})\s+\*?(bailong-desktop-pet-(\d+\.\d+\.\d+)-windows-x64\.zip)',line)
+        if match:candidates.append((match[1].lower(),match[2],match[3]))
+    if len(candidates)!=1:raise UpdateError('备用通道缺少唯一完整包校验值')
+    sha,name,version=candidates[0];version='.'.join(map(str,version_tuple(version)));tag='v'+version
+    base='https://github.com/'+REPOSITORY+'/releases/download/'+tag+'/'
+    check_cancel(cancel)
+    with opener(base+name,{'Range':'bytes=0-0'}) as response:
+        content_range=response.headers.get('Content-Range','')
+        match=re.fullmatch(r'bytes 0-\d+/(\d+)',content_range)
+        if getattr(response,'status',200)==206 and not match:raise UpdateError('备用通道文件大小响应无效')
+        size=int(match[1]) if match else int(response.headers.get('Content-Length','0'))
+    if not 0<size<=MAX_PACKAGE:raise UpdateError('备用更新包大小无效')
+    return Release(version,tag,name,asset_url(base+name,tag,name),size,sha,
+        '通过 GitHub 下载通道核验更新。完整更新说明请点击“在 GitHub 查看”。',checksum_url=base+'SHA256SUMS.txt',reason='GitHub API 暂不可用，已通过下载通道核验完整包')
+
 def check_release(current,opener=open_url,cancel=lambda:False,app_root=None):
     try:
         release=parse_release(json.loads(read_small(API,2_000_000,opener,cancel)))
@@ -116,7 +136,12 @@ def check_release(current,opener=open_url,cancel=lambda:False,app_root=None):
         return release
     except urllib.error.HTTPError as exc:
         if exc.code==404:raise NoRelease('暂无公开稳定版本') from None
-        if exc.code in (403,429):raise UpdateError('检查次数暂时受限，请稍后重试') from None
+        if exc.code in (403,429):
+            try:return release_without_api(opener,cancel)
+            except UpdateCancelled:raise
+            except (UpdateError,OSError,ValueError,AttributeError,UnicodeError):
+                limited=exc.code==429 or exc.headers and exc.headers.get('X-RateLimit-Remaining')=='0'
+                raise UpdateError('GitHub API 检查次数暂时受限，备用下载通道也未连接成功；可在 GitHub 手动下载或稍后重试' if limited else 'GitHub 拒绝更新请求，备用通道也未连接成功；请检查网络后重试') from None
         raise UpdateError('获取更新信息失败，请稍后重试') from None
     except (OSError,ValueError,UnicodeError):raise UpdateError('暂时无法连接 GitHub，请稍后重试') from None
 

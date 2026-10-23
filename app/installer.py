@@ -27,13 +27,28 @@ def checked_version(root,name):
     if not (path/'BailongEnhanced.exe').is_file():raise ValueError('安装版本目录无效')
     return path
 def ps_string(value):return "'"+str(value).replace("'","''")+"'"
+def shortcut_script(exe,paths):
+    """Replace legacy launch options; fail the transaction on any COM error."""
+    script="$ErrorActionPreference='Stop'\n$s=New-Object -ComObject WScript.Shell\n"
+    script+="$paths=@("+','.join(paths)+")\n"
+    script+="foreach($p in $paths){[IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($p))|Out-Null;$l=$s.CreateShortcut($p);$l.TargetPath="+ps_string(exe)+";$l.Arguments='';$l.WorkingDirectory="+ps_string(exe.parent)+";$l.IconLocation="+ps_string(str(exe)+',0')+";$l.WindowStyle=1;$l.Description='白龙桌宠增强版';$l.Save()}"
+    return script
+
+def entry_script(exe,desktop_folder=None,startmenu_folder=None):
+    """Create the current named entries and retire only our managed old alias."""
+    desktop_folder=desktop_folder or "([Environment]::GetFolderPath('Desktop'))"
+    startmenu_folder=startmenu_folder or "(Join-Path ([Environment]::GetFolderPath('StartMenu')) 'Programs')"
+    desktop="(Join-Path "+desktop_folder+" '白龙桌宠增强版.lnk')"
+    startmenu="(Join-Path "+startmenu_folder+" '白龙桌宠增强版.lnk')"
+    script=shortcut_script(exe,[desktop,startmenu])
+    old="(Join-Path "+desktop_folder+" '白龙桌宠.lnk')"
+    script+="\n$old="+old+";if(Test-Path -LiteralPath $old){$t=$s.CreateShortcut($old).TargetPath;$base="+ps_string(str(exe.parent.parent)+os.sep)+";if($t.StartsWith($base,[StringComparison]::OrdinalIgnoreCase) -and [IO.Path]::GetFileName($t) -ieq 'BailongEnhanced.exe'){Remove-Item -LiteralPath $old}}"
+    return script
+
 def register(exe,maintenance,startup):
     import winreg
     root=exe.parent
-    # New shortcuts supersede the old Python entry, preserving the visible names.
-    script="$s=New-Object -ComObject WScript.Shell\n"
-    script+="$paths=@((Join-Path ([Environment]::GetFolderPath('Desktop')) '白龙桌宠增强版.lnk'),(Join-Path ([Environment]::GetFolderPath('Desktop')) '白龙桌宠.lnk'),(Join-Path ([Environment]::GetFolderPath('StartMenu')) 'Programs\\白龙桌宠增强版.lnk'))\n"
-    script+="foreach($p in $paths){$l=$s.CreateShortcut($p);$l.TargetPath="+ps_string(exe)+";$l.WorkingDirectory="+ps_string(root)+";$l.Description='白龙桌宠增强版';$l.Save()}"
+    script=entry_script(exe)
     result=subprocess.run(['powershell.exe','-NoProfile','-Command',script],capture_output=True,creationflags=0x08000000)
     if result.returncode:raise OSError('创建快捷方式失败')
     startup_dir=Path(os.environ['APPDATA'])/'Microsoft/Windows/Start Menu/Programs/Startup'

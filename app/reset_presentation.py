@@ -1,7 +1,7 @@
 """Relative public reset estimates; reaching a date is never confirmation."""
 import math
 import time
-from reset_watch import pending_reset,epoch,local_time,schedule_text
+from reset_watch import pending_reset,locally_reset,epoch,local_time,schedule_text
 
 def reset_view(snapshot,error=False,now=None):
     now=time.time() if now is None else now
@@ -24,6 +24,8 @@ def reset_view(snapshot,error=False,now=None):
             unit='分钟';value='<1' if remaining<60 else str(total_minutes)
         next_change=min(remaining,remaining-(total_minutes-1)*60)
         if remaining==60:next_change=.001  # The next visible value is “<1”.
+    if locally_reset(snapshot):
+        phase='local_reset';eyebrow='本机额度';value='已重置';unit='';minutes=None;note='公告仍待确认';next_change=None
     if error and snapshot is not None:
         eyebrow='上次安排 · 预计' if phase=='scheduled' else '上次公告记录'
     parts=[(value,unit)]+([(minutes,'分钟')] if minutes is not None else [])

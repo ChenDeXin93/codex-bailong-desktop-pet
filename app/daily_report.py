@@ -2,7 +2,7 @@
 import math,random
 from html import escape
 from datetime import datetime
-from PySide6.QtCore import Qt,QRect,QRectF,QPointF,QPoint,QEvent,Signal,QVariantAnimation,QEasingCurve,QAbstractAnimation,QTimer
+from PySide6.QtCore import Qt,QRect,QRectF,QPointF,QPoint,QSize,QEvent,Signal,QVariantAnimation,QEasingCurve,QAbstractAnimation,QTimer
 from PySide6.QtGui import QPainter,QPainterPath,QPen,QColor,QFontMetrics,QPixmap,QRegion
 from PySide6.QtWidgets import QWidget,QVBoxLayout,QHBoxLayout,QLabel,QToolButton,QScrollArea,QApplication,QSizePolicy
 from compact_bubble import font,INK,MUTED,FONT_CSS,action_button
@@ -482,6 +482,10 @@ class DailyReport(QWidget):
         # operations on animation frames, in either direction.
         self.repaint()
     def _finished(self):
+        from panel_transition import present_barrier
+        guarded=self.requested and self._animating and QApplication.platformName()=='windows'
+        if guarded:
+            self.follow.shield.present(self.grab(),self.geometry());present_barrier()
         self._animating=False
         if not self.requested:
             self.fraction=0.;self._frame=None;self.surface.hide()
@@ -496,6 +500,8 @@ class DailyReport(QWidget):
             self._frame=None;self._input_passthrough(False)
         finally:self.setUpdatesEnabled(enabled)
         self.repaint()
+        if guarded:
+            present_barrier();self.follow.park(self.follow.shield)
         if self.plot:self.plot.start_reveal()
     def sync_geometry(self):
         if self._building or self._syncing or self.follow.active:return
@@ -515,7 +521,8 @@ class DailyReport(QWidget):
                 if self.page=='overview' and getattr(self,'stats',None):self.stats.set_columns(width-22)
             self._measure_overview()
             target=max(1,min(self.natural_height,b.y()-area.top()-self.GAP-self.PAD))
-            self.surface.setFixedSize(width,target);self.surface.move(self.PAD,self.PAD);self.layout.activate()
+            if self.surface.size()!=QSize(width,target):self.surface.setFixedSize(width,target)
+            self.surface.move(self.PAD,self.PAD);self.layout.activate()
             self.setGeometry(b.x()-self.PAD,b.y()-self.GAP-target-self.PAD,width+2*self.PAD,target+2*self.PAD)
             if self.isVisible():self.repaint()
         finally:self._syncing=False
