@@ -86,7 +86,8 @@ class ResetTests(unittest.TestCase):
             def __enter__(self):return self
             def __exit__(self,*args):pass
             def read(self,size):return b'{"events":[],"scheduled":null}'
-        with patch('urllib.request.urlopen',return_value=Response()) as open_url:
+        with patch('urllib.request.build_opener') as factory:
+            open_url=factory.return_value.open;open_url.return_value=Response()
             fetch_feed()
             req=open_url.call_args.args[0]
             self.assertEqual(req.full_url,API_URL)

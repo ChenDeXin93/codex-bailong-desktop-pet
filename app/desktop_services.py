@@ -61,12 +61,17 @@ def protect(value,decrypt=False):
 class SecretStore:
     def __init__(self,path):self.path=Path(path)
     def read(self):
-        try:return json.loads(self.path.read_text(encoding='utf-8'))
-        except (OSError,ValueError):return {}
+        try:data=json.loads(self.path.read_text(encoding='utf-8'))
+        except FileNotFoundError:return {}
+        except (OSError,ValueError,UnicodeError,RecursionError):
+            raise OSError('无法读取 credentials.dpapi.json；请检查权限或从用户数据备份恢复，原文件未改动。') from None
+        if not isinstance(data,dict) or any(not isinstance(k,str) or not k or not isinstance(v,str) or not v for k,v in data.items()):
+            raise OSError('credentials.dpapi.json 结构损坏；请从用户数据备份恢复，原文件未改动。')
+        return data
     def get(self,name):
         value=self.read().get(name)
         try:return protect(value,True) if value else ''
-        except (ValueError,TypeError,UnicodeError):raise OSError('无法读取本地加密凭据') from None
+        except (OSError,ValueError,TypeError,UnicodeError):raise OSError('无法解密本地密钥；请使用保存时的 Windows 用户，或重新填写密钥。') from None
     def put(self,name,value):
         data=self.read()
         if value:data[name]=protect(value)
@@ -74,7 +79,9 @@ class SecretStore:
         atomic_json(self.path,data)
 
 def checked_path(root,name):
-    p=(root/name).resolve()
+    relative=Path(name)
+    if relative.is_absolute() or relative.drive or '..' in relative.parts or ':' in str(name):raise ValueError('素材清单必须使用目录内的相对路径')
+    p=(root/relative).resolve()
     if not p.is_relative_to(root.resolve()):raise ValueError('素材路径超出了角色目录')
     if not p.is_file():raise ValueError('缺少素材：'+str(name))
     return p

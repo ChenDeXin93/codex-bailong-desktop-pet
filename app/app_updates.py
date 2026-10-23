@@ -113,31 +113,49 @@ def release_without_api(opener=open_url,cancel=lambda:False):
         if getattr(response,'status',200)==206 and not match:raise UpdateError('备用通道文件大小响应无效')
         size=int(match[1]) if match else int(response.headers.get('Content-Length','0'))
     if not 0<size<=MAX_PACKAGE:raise UpdateError('备用更新包大小无效')
-    return Release(version,tag,name,asset_url(base+name,tag,name),size,sha,
-        '通过 GitHub 下载通道核验更新。完整更新说明请点击“在 GitHub 查看”。',checksum_url=base+'SHA256SUMS.txt',reason='GitHub API 暂不可用，已通过下载通道核验完整包')
+    full=Release(version,tag,name,asset_url(base+name,tag,name),size,sha,
+        '通过 GitHub 下载通道核验更新。完整更新说明请点击“在 GitHub 查看”。',checksum_url=base+'SHA256SUMS.txt',reason='GitHub API 暂不可用，已通过下载通道核验更新')
+    records={m[2]:m[1].lower() for line in sums.splitlines() if (m:=re.fullmatch(r'([0-9a-fA-F]{64})\s+\*?(.+)',line))}
+    program=f'bailong-desktop-pet-{version}-program.zip';info=f'bailong-desktop-pet-{version}-program.json'
+    if program in records and info in records:
+        try:
+            raw=read_small(base+info,65536,opener,cancel)
+            if hashlib.sha256(raw).hexdigest()!=records[info]:raise UpdateError('程序包描述校验失败')
+            with opener(base+program,{'Range':'bytes=0-0'}) as response:
+                match=re.fullmatch(r'bytes 0-\d+/(\d+)',response.headers.get('Content-Range',''))
+                if getattr(response,'status',200)==206 and not match:raise UpdateError('程序包大小响应无效')
+                n=int(match[1]) if match else int(response.headers.get('Content-Length','0'))
+            if not 0<n<=MAX_PACKAGE:raise UpdateError('程序包大小无效')
+            return replace(full,asset_name=program,download_url=asset_url(base+program,tag,program),size=n,sha256=records[program],kind='program',program_info_url=base+info,fallback=full)
+        except UpdateCancelled:raise
+        except (UpdateError,OSError,ValueError):pass
+    return full
+
+def prepare_release(release,current,opener,cancel,app_root):
+    if version_tuple(release.version)>version_tuple(current):
+        if release.kind=='program':
+            from program_updates import local_materials,MaterialMismatch
+            from pet import ROOT
+            try:
+                info=json.loads(read_small(release.program_info_url,65536,opener,cancel))
+                if info.get('schema')!=1 or info.get('kind')!='program' or info.get('version')!=release.version or not re.fullmatch('[0-9a-f]{24}',str(info.get('materialId',''))):raise MaterialMismatch('纯程序包说明不匹配')
+                local_materials(app_root or ROOT,info['materialId'],cancel)
+                release=ensure_checksum(replace(release,material_id=info['materialId']),opener,cancel)
+            except UpdateCancelled:raise
+            except (UpdateError,OSError,ValueError,KeyError,AttributeError) as exc:
+                if not release.fallback:raise UpdateError('本机暂不能使用该纯程序包，且该版本未提供完整包') from exc
+                release=replace(release.fallback,reason='本地素材不兼容或程序包说明不可用，改用完整安装包')
+        release=ensure_checksum(release,opener,cancel)
+    return release
 
 def check_release(current,opener=open_url,cancel=lambda:False,app_root=None):
     try:
         release=parse_release(json.loads(read_small(API,2_000_000,opener,cancel)))
-        if version_tuple(release.version)>version_tuple(current):
-            if release.kind=='program':
-                from program_updates import local_materials,MaterialMismatch
-                from pet import ROOT
-                try:
-                    info=json.loads(read_small(release.program_info_url,65536,opener,cancel))
-                    if info.get('schema')!=1 or info.get('kind')!='program' or info.get('version')!=release.version or not re.fullmatch('[0-9a-f]{24}',str(info.get('materialId',''))):raise MaterialMismatch('纯程序包说明不匹配')
-                    local_materials(app_root or ROOT,info['materialId'],cancel)
-                    release=ensure_checksum(replace(release,material_id=info['materialId']),opener,cancel)
-                except UpdateCancelled:raise
-                except (UpdateError,OSError,ValueError,KeyError) as exc:
-                    if not release.fallback:raise UpdateError('本机暂不能使用该纯程序包，且该版本未提供完整包') from exc
-                    release=replace(release.fallback,reason='本地素材不兼容或程序包说明不可用，改用完整安装包')
-            release=ensure_checksum(release,opener,cancel)
-        return release
+        return prepare_release(release,current,opener,cancel,app_root)
     except urllib.error.HTTPError as exc:
         if exc.code==404:raise NoRelease('暂无公开稳定版本') from None
         if exc.code in (403,429):
-            try:return release_without_api(opener,cancel)
+            try:return prepare_release(release_without_api(opener,cancel),current,opener,cancel,app_root)
             except UpdateCancelled:raise
             except (UpdateError,OSError,ValueError,AttributeError,UnicodeError):
                 limited=exc.code==429 or exc.headers and exc.headers.get('X-RateLimit-Remaining')=='0'

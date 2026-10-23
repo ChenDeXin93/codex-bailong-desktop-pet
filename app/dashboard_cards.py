@@ -58,10 +58,10 @@ class CardDeck(QWidget):
         tabs=DeckTabs();self.tabs=tabs;row=QHBoxLayout(tabs);row.setContentsMargins(0,0,0,0);row.setSpacing(3)
         for key,text in [('tokens','Token'),('reset','重置')]:
             button=QToolButton();button.setObjectName('card_'+key);button.setText(text);button.setCheckable(True);button.setChecked(page==key);button.setFocusPolicy(Qt.FocusPolicy.NoFocus);button.setCursor(Qt.CursorShape.PointingHandCursor)
-            button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly);button.setFont(font(11,True));button.setFixedSize(45 if key=='tokens' else 35,20)
+            button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly);button.setFont(font(12,True));button.setFixedSize(45 if key=='tokens' else 35,20)
             button.setToolTip('Token用量柱状图与今日小时曲线' if key=='tokens' else ('有重置公告待落实，点击查看' if reset_has_priority(reset_snapshot) else '查看额外重置公告'))
             accent='#75618d'
-            button.setStyleSheet('QToolButton{'+FONT_CSS+'font-size:11px;color:'+accent+';border:0;border-radius:5px;padding:1px;background:transparent;}QToolButton:hover:!checked{background:#f1ecf6;}')
+            button.setStyleSheet('QToolButton{'+FONT_CSS+'font-size:12px;color:'+accent+';border:0;border-radius:5px;padding:1px;background:transparent;}QToolButton:hover:!checked{background:#f1ecf6;}')
             button.clicked.connect(lambda checked=False,k=key:self.selected.emit(k));row.addWidget(button,1);tabs.buttons[key]=button
         layout.addWidget(tabs)
         self.stack=QStackedWidget();self.stack.setFixedHeight(78);layout.addWidget(self.stack);self.set_page(page,False)

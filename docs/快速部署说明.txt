@@ -1,5 +1,5 @@
 Codex&GPT桌宠数据中心｜Windows x64
-本地开发版 v0.8.8（本轮发布版）；本次发布后公开稳定版更新为 v0.8.8。以下设置分类针对本地新版，旧公开版名称可能不同。
+当前公开稳定版 v0.9.3 / UI82。首次安装请下载完整 Windows ZIP；支持程序小包的旧版客户端可通过应用内更新升级。以下设置分类针对当前版。
 原项目来源：https://github.com/jingh12312-rgb/bailong-desktop-pet
 增强版仓库：https://github.com/Wunsch2048/codex-bailong-desktop-pet
 

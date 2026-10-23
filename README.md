@@ -2,9 +2,17 @@
 
 ![文章海报](docs/media/cover.png)
 
-一只陪你使用 Codex 的 Windows 白龙桌宠：在桌面查看任务状态、接收完成提醒、追踪账户额度和 Token 用量。基于 [jingh12312-rgb/bailong-desktop-pet](https://github.com/jingh12312-rgb/bailong-desktop-pet) 持续改造，当前版本 **v0.8.8 / UI77**。
+一只陪你使用 Codex 的 Windows 白龙桌宠：在桌面查看任务状态、接收完成提醒、追踪账户额度和 Token 用量。基于 [jingh12312-rgb/bailong-desktop-pet](https://github.com/jingh12312-rgb/bailong-desktop-pet) 持续改造，当前版本 **v0.9.3 / UI82**。
 
 **[下载安装包](https://github.com/Wunsch2048/codex-bailong-desktop-pet/releases/latest)** · [快速部署](docs/快速部署说明.txt) · [全部新增功能](docs/新增功能说明.txt) · [开发说明](docs/DEVELOPMENT.md) · [迭代历史](docs/迭代历史.txt)
+
+### v0.9.3 更新（水球状态图标与浅色主题）
+
+进行中图标由三颗水球绕中心旋转、交错换位并轮流短暂黏连；完成、等待、中断与待命等状态各有清晰图形。浅色卡片和深色胶囊使用各自适配的颜色，图标在状态切换时平滑变形。动图来自实装控件连续帧：
+
+![v0.9.3 浅色卡片和深色胶囊状态动画](https://github.com/Wunsch2048/codex-bailong-desktop-pet/releases/download/v0.9.3/status-liquid-0.9.3.gif)
+
+本次累积发布还修复持续工作循环中的笔记本反复开合，统一数字、英文和中文字体，并改善闲聊服务配置与错误提示。完整说明见[ v0.9.3 发布说明](docs/releases/v0.9.3.md)。提供完整 Windows 安装 ZIP 和程序更新 ZIP/JSON。
 
 ## 桌面上可以做什么
 

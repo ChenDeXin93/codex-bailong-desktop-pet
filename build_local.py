@@ -18,6 +18,8 @@ def source_hashes():
     paths=list((ROOT/'app').glob('*.py'))
     paths += [ROOT/name for name in ('build_local.py','quality_check.py','build_release.py','check_bundle.py','deploy_release.py','release_version.py','release_retention.py','asset_pack.py','build_materials.py','build_program_update.py','package_trim.py','test_local_workflow.py','test_release_version.py','test_release_retention.py') if (ROOT/name).is_file()]
     if (ROOT/'app/material_catalog.json').is_file():paths.append(ROOT/'app/material_catalog.json')
+    paths += [p for p in [ROOT/'requirements-enhanced.txt',ROOT/'app/book_catalog.json'] if p.is_file()]
+    paths += [p for p in (ROOT/'app/fonts').glob('*') if p.is_file()]
     paths += list((ROOT/'app/branding').glob('*.ico'))
     manifest=ROOT/'outputs/白龙桌宠素材/素材清单.json'
     if manifest.is_file():
@@ -61,6 +63,15 @@ def native_matrix(exe,label):
         print(f'原生交互通过：{factor}x，{proof["actions"]} 段动作，{proof["bodyPoints"]} 个人物采样点',flush=True)
     return proofs
 
+def verify_tls_runtime(exe):
+    output=ROOT/'本地实装/冻结TLS验收.json';output.unlink(missing_ok=True)
+    with tempfile.TemporaryDirectory(prefix='bailong-tls-check-') as folder:
+        env=os.environ.copy();env.update(LOCALAPPDATA=folder,CODEX_HOME=str(Path(folder)/'codex'))
+        subprocess.run([str(exe),'--reset-diagnostics',str(output),'--tls-only'],cwd=exe.parent,env=env,check=True,timeout=20,creationflags=0x08000000)
+    proof=read(output)
+    if not all(proof.get(k) is True for k in ('contextReady','certificateVerification','hostnameVerification','offline')):raise ValueError('冻结程序TLS初始化或证书验证验收失败')
+    return dict(passed=True,offline=True,certificateVerification=True,hostnameVerification=True)
+
 def snapshot_source():
     dest=ROOT/'本地实装/源码快照'/(VERSION+'-'+time.strftime('%Y%m%d-%H%M%S'));dest.mkdir(parents=True)
     files=[p for p in (ROOT/'app').glob('*.py') if not p.name.startswith(('test_','qa_'))]
@@ -84,7 +95,7 @@ def verify_installed(result):
         except (OSError,ValueError,psutil.Error,KeyError):pass
         time.sleep(.2)
     else:raise OSError('新版已提交，但安装后运行状态未能确认；保留旧版本可回退')
-    for key in ('shared_body_tail_decode','nonblocking_decoder_cancel','adaptive_animation_clock','high_resolution_frame_clock','program_only_updates','material_tiers','isolated_report_presentation','natural_sustained_variants','independent_card_surface','minimal_quota_mode','isolated_transition_preparation','cleared_native_landing','linked_report_motion','continuous_state_playback','native_client_hit_testing','shared_paint_hit_transform','lost_mouse_grab_recovery','character_switch_keeps_navigation','in_app_updates','video_completion_priority'):
+    for key in ('liquid_status_family','chat_config_safe_commit','chat_actionable_errors','shared_body_tail_decode','nonblocking_decoder_cancel','adaptive_animation_clock','high_resolution_frame_clock','program_only_updates','material_tiers','isolated_report_presentation','semantic_sustained_loops','independent_card_surface','minimal_quota_mode','isolated_transition_preparation','cleared_native_landing','linked_report_motion','continuous_state_playback','native_client_hit_testing','shared_paint_hit_transform','lost_mouse_grab_recovery','character_switch_keeps_navigation','in_app_updates','video_completion_priority'):
         if runtime.get(key) is not True:raise ValueError('安装后缺少功能：'+key)
     m=read_manifest();previous=result['previous']
     if previous:
@@ -128,9 +139,9 @@ def build_and_deploy(options):
     with (ROOT/'本地实装/应用构建.log').open('w',encoding='utf-8') as log:
         subprocess.run([sys.executable,str(ROOT/'build_release.py')],cwd=ROOT,stdout=log,stderr=subprocess.STDOUT,check=True)
     folder=ROOT/'release/BailongEnhanced'
-    code=verify_code(folder);probes=native_matrix(folder/'BailongEnhanced.exe','构建')
+    code=verify_code(folder);tls=verify_tls_runtime(folder/'BailongEnhanced.exe');probes=native_matrix(folder/'BailongEnhanced.exe','构建')
     snapshot=snapshot_source()
-    proof=dict(version=VERSION,executableSha256=sha(folder/'BailongEnhanced.exe'),compiledCode=code,nativeMatrix=[{k:p[k] for k in ('passed','dpr','actions','sampledFrames','bodyPoints','transparentPoints','nativePressDragRelease')} for p in probes],sourceSnapshot=str(snapshot),fullInstallerGenerated=False,githubUploaded=False)
+    proof=dict(version=VERSION,executableSha256=sha(folder/'BailongEnhanced.exe'),compiledCode=code,tlsRuntime=tls,nativeMatrix=[{k:p[k] for k in ('passed','dpr','actions','sampledFrames','bodyPoints','transparentPoints','nativePressDragRelease')} for p in probes],sourceSnapshot=str(snapshot),fullInstallerGenerated=False,githubUploaded=False)
     atomic(ROOT/'本地实装/构建验收.json',proof)
     if options.build_only:return 0
     return install_verified(proof,folder)
@@ -141,7 +152,9 @@ def install_verified(proof,folder):
     # to a passing regression receipt for the current production/test tree.
     regression=read(ROOT/'本地实装/回归验收/current-regressions.json')
     current=source_hashes()
-    if not regression['passed'] or regression['sourceHashes']!=current:raise ValueError('当前源码尚未通过隔离回归检查')
+    expected=sorted([p.stem for p in (ROOT/'app').glob('test_*.py')]+['test_release_version','test_release_retention','test_local_workflow'])
+    if not regression.get('passed') or regression.get('scope')!='full' or regression.get('expectedModules')!=expected or regression.get('modules')!=len(expected) or regression['sourceHashes']!=current:raise ValueError('当前源码尚未通过完整隔离回归检查')
+    if not all(proof.get('tlsRuntime',{}).get(k) is True for k in ('passed','certificateVerification','hostnameVerification','offline')):raise ValueError('当前构建缺少冻结程序TLS验收')
     from installer import DATA,startup_preference
     from directory_deploy import deploy_directory
     DATA.mkdir(parents=True,exist_ok=True);deployment_lock=QLockFile(str(DATA/'deployment.lock'))
@@ -150,7 +163,6 @@ def install_verified(proof,folder):
         result=deploy_directory(folder,startup_preference())
         proof.update(deployment=result,installed=verify_installed(result))
         proof['regression']=dict(modules=regression['modules'],tests=regression['tests'],passed=True)
-        if list((ROOT/'release').glob('*'+VERSION+'*')):raise ValueError('本地迭代意外产生发布安装包，请检查流程')
         atomic(ROOT/'本地实装/最终验收.json',proof)
         print(json.dumps(dict(version=VERSION,current=result['current'],previous=result['previous'],backup=result['backup'],fullInstallerGenerated=False,passed=True),ensure_ascii=False),flush=True)
     finally:deployment_lock.unlock()

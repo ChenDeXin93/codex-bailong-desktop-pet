@@ -130,9 +130,8 @@ class DesktopPet(EnhancedPet):
 
     def asset_path(self,item):
         name=item.get('playbackFile') or item['file'].replace('.webm','.webp')
-        path=(self.asset_root/name).resolve()
-        if not path.is_relative_to(self.asset_root.resolve()):raise ValueError('素材路径不在角色目录内')
-        return path
+        from material_store import checked
+        return checked(self.asset_root,name)
 
     def play(self,item,mode):
         if self._visibility_ready and (self._desktop_hidden or not self.settings.get('character_visible',True)):return False
@@ -168,7 +167,7 @@ class DesktopPet(EnhancedPet):
         if not hasattr(self,'motion_timer') or not self.motion_timer.isActive():return
         active=self.walking or self.throwing
         interval=16 if active else 1000
-        if not active and self.settings.get('self_talk'):
+        if not active and self.settings.get('self_talk') and self.settings.get('character_visible',True) and not getattr(self,'_desktop_hidden',False):
             interval=max(1,min(1000,math.ceil((self.next_talk-time.monotonic())*1000)))
         if self.motion_timer.interval()!=interval:
             if active:self.motion_clock=time.perf_counter()
@@ -190,7 +189,9 @@ class DesktopPet(EnhancedPet):
         was_sustained=self.sustained.active
         if was_sustained:
             owner=self.sustained.owner
-            self.sustained.request(bool(not self._pending_material and desired and (desired.session,desired.turn,desired.action_id)==(owner.session,owner.turn,owner.action_id)))
+            same_turn=bool(desired and (desired.session,desired.turn)==(owner.session,owner.turn))
+            hard=bool(self._pending_material or not same_turn)
+            self.sustained.request(bool(not hard and desired.action_id==owner.action_id),hard=hard)
         frame,ended=self.player.advance(self.frame_size,getattr(self,'settings',{}).get('playback_speed',1)*self.sustained.speed_factor(self.player))
         if frame is not None:
             self.frames=[frame];self.index=0;self._hit_image=frame.toImage();self.update_frame()
@@ -235,7 +236,7 @@ class DesktopPet(EnhancedPet):
                     self.sustained.cancel();self.gate.state='idle';self.decode_error='sustained_start_failed';return False
                 self.current=item;self.mode='reaction';self.frames=[frame];self.index=0;self._hit_image=frame.toImage()
                 self.started=now;self.transition=None;self.update_frame()
-                self.continuous.commit(desired);self.last_reaction=desired;self.reactions.record(desired,now)
+                self.continuous.commit(desired,now);self.last_reaction=desired;self.reactions.record(desired,now)
                 return True
             selected=self.reactions.take_current(desired,now)
         # Paused feedback remains a one-shot, independent of active-state loops.
@@ -249,7 +250,7 @@ class DesktopPet(EnhancedPet):
         if selected.kind=='complete':self.pending_completion=None
         mode='task' if selected.kind=='complete' else 'reaction'
         if not self.play(item,mode):return False
-        if selected.kind not in ('complete','received'):self.continuous.commit(selected)
+        if selected.kind not in ('complete','received'):self.continuous.commit(selected,now)
         self.last_reaction=selected
         return True
 
@@ -493,6 +494,7 @@ class DesktopPet(EnhancedPet):
             self._codex_exit_gate.reset()
         old_size=self.height();foot=self.geometry().bottom()+1;center=self.geometry().center().x()
         self.settings.update(values);self.settings=normalized(self.settings)
+        if 'card_anchor' in values:self._card_anchor=copy.deepcopy(self.settings.get('card_anchor'))
         if (self.settings['no_move'] or self.settings['mouse_through'] or
             self.settings['scale']!=previous.get('scale') or self.settings['on_top']!=previous.get('on_top')):
             self.cancel_pointer()
@@ -531,7 +533,7 @@ class DesktopPet(EnhancedPet):
         if save:
             try:self.save_settings()
             except (OSError,ValueError):
-                self.settings=previous;self.apply_settings({},save=False);raise
+                self.settings=previous;self._card_anchor=copy.deepcopy(previous.get('card_anchor'));self.apply_settings({},save=False);raise
         changed={key:copy.deepcopy(value) for key,value in self.settings.items() if previous.get(key)!=value}
         if changed:
             self.settings_revision+=1;self.settingsChanged.emit(changed)
@@ -749,7 +751,7 @@ class DesktopPet(EnhancedPet):
     def open_settings(self):
         if not self.settings_dialog:
             from desktop_settings import SettingsDialog
-            self.settings_dialog=SettingsDialog(self,embedded=True)
+            self.settings_dialog=SettingsDialog(self,embedded=True,lazy=True)
         self.settings_dialog.sync_from_pet(read_startup=True)
         self.show_panel(self.settings_dialog)
     def open_status(self):
@@ -877,6 +879,27 @@ class DesktopPet(EnhancedPet):
         value['asset_count']=len(all_items(self.manifest));value['decode_error']=self.decode_error
         value['work_animation_count']=len([v for v in self.manifest.get('workAnimations',[]) if v]);value['semantic_work_actions']=True;value['explicit_task_arrival_animation']=True
         atomic_json(path,value);self.say('诊断已保存：'+path.name,6000)
+    def cleanup_installations(self):
+        from installer import ROOT as install_root,DATA
+        from installation_cleanup import cleanup_plan,CleanupJob
+        if getattr(self,'_cleanup_job',None):self.say('历史版本清理正在进行。',3000);return
+        try:
+            plan=cleanup_plan(install_root)
+            if not plan['versions'] and not plan['backups']:
+                QMessageBox.information(self.settings_dialog,'清理历史版本','没有可清理的历史版本和备份。');return
+            text=f"将清理 {len(plan['versions'])} 个历史版本、{len(plan['backups'])} 份旧部署备份。\n保留当前版本、最近两个回退版本、运行中的版本及相关备份。\n设置、聊天记录和当前素材保留。是否继续？"
+            if QMessageBox.question(self.settings_dialog,'清理预览',text)!=QMessageBox.StandardButton.Yes:return
+            self._cleanup_job=CleanupJob(install_root,DATA,plan,self)
+            self._cleanup_job.done.connect(self.cleanup_done)
+            self._cleanup_job.failed.connect(lambda message:QMessageBox.warning(self.settings_dialog,'清理未完成',message))
+            self._cleanup_job.finished.connect(self.cleanup_finished);self._cleanup_job.start()
+        except (OSError,ValueError) as error:QMessageBox.warning(self.settings_dialog,'清理未完成',str(error))
+    def cleanup_done(self,result):
+        if not getattr(self,'_cleanup_exit_pending',False):QMessageBox.information(self.settings_dialog,'清理完成',f"已清理 {result['versions']} 个版本、{result['backups']} 份备份。")
+    def cleanup_finished(self):
+        job=self._cleanup_job;self._cleanup_job=None;job.deleteLater()
+        if getattr(self,'_cleanup_exit_pending',False):self.close()
+
     def backup_settings(self):
         path=STATE_DIR/('settings-backup-'+time.strftime('%Y%m%d-%H%M%S')+'.json');self.save_settings();shutil.copy2(CONFIG,path)
         self.say('设置备份已保存到配置目录。',5000)
@@ -884,7 +907,15 @@ class DesktopPet(EnhancedPet):
         path,_=QFileDialog.getOpenFileName(self.settings_dialog,'选择设置备份',str(STATE_DIR),'JSON (*.json)')
         if not path:return
         try:
-            raw=json.loads(Path(path).read_text(encoding='utf-8'));self.backup_settings();self.apply_settings(normalized(raw));self.restore_saved_position()
+            raw=json.loads(Path(path).read_text(encoding='utf-8'))
+            if not isinstance(raw,dict):raise ValueError('设置备份格式无效')
+            desired=normalized(raw);previous=copy.deepcopy(self.settings);self.backup_settings()
+            try:
+                if desired['character']!=self.settings['character']:self.switch_character(desired['character'])
+                self.apply_settings(desired);self.restore_saved_position();self.position_bubble()
+            except (OSError,ValueError):
+                if self.settings['character']!=previous['character']:self.switch_character(previous['character'])
+                self.apply_settings(previous);self.restore_saved_position();raise
             if self.settings_dialog:self.settings_dialog.reload()
         except (OSError,ValueError) as error:QMessageBox.warning(self.settings_dialog,'恢复失败',str(error))
     def record_state(self):
@@ -901,7 +932,7 @@ class DesktopPet(EnhancedPet):
             independent_card_surface=True,character_visible=self.settings['character_visible'],minimal_quota_mode=True,hidden_character_decoder_paused=not self.settings['character_visible'] and not self.tick.isActive(),
             isolated_transition_preparation=True,cleared_native_landing=True,linked_report_motion=True,
             continuous_state_playback=True,sustained_animation_phase=self.sustained.phase,sustained_animation_cycles=self.sustained.cycles,
-            natural_sustained_variants=True,isolated_report_presentation=True,sustained_animation_variant=self.sustained.variant_index,
+            natural_sustained_variants=False,semantic_sustained_loops=True,isolated_report_presentation=True,sustained_animation_variant=self.sustained.variant_index,
             sustained_supported_actions=[i['id'] for i in self.manifest.get('workAnimations',[]) if i.get('sustained')],status_stability_seconds=self.continuous.stable_seconds,
             asset_count=len(all_items(self.manifest)),work_animation_count=len([v for v in self.manifest.get('workAnimations',[]) if v]),
             semantic_work_actions=True,explicit_task_arrival_animation=True,current_animation=self.current.get('id') if self.current else None,
@@ -914,10 +945,10 @@ class DesktopPet(EnhancedPet):
         process=psutil.Process();mem=process.memory_info()
         snapshot=self.bubble.token_snapshot or {}
         idle_cache=self.player.loop_cache.stats() if self.player else dict(bytes=0,hits=0,limit=24*1048576)
-        from typography import LATIN_FAMILY,register_font
+        from typography import LATIN_FAMILY,CHINESE_FAMILY,register_font
         report=self.bubble.report
         report_data=snapshot.get('report') or {}
-        value.update(ui_revision=77,panel_detached=self.settings.get("panel_detached",False),codex_exit_enabled=self.settings.get("codex_exit",False),glide_interval_ms=16,update_download_channel_fallback=True,reset_countdown_format='hours_minutes',read_terminal_turn_acknowledgement=True,reset_countdown_priority=True,customizable_capsule_shortcut=True,capsule_shortcut=self.settings['capsule_action'],codex_startup_supported=True,hourly_token_entry='today_tokens',unified_refresh=True,icon_only_header_actions=True,refresh_icon_style='single_arc',icon_motion_speed=1.2,busy_icon_style='orbit_rings',status_icon_morph=True,status_waiting_live_flags=True,island_quota_segmented=False,island_quota_style='open_arc',island_quota_numeric_only=True,native_shrink_landing=True,shrink_preserves_chart_progress=True,native_landing_hold_ms=0,cached_chart_layers=True,stable_report_scrollbar=True,animated_deck_tabs=True,incremental_deck_switch=True,prewarmed_transition_landing=True,monotone_container_motion=True,status_updates_preserve_surface=True,capsule_pixel_handoff=True,atomic_transition_handoff=True,clean_report_dismiss=True,stable_disclosure_gutter=True,unified_card_motion=True,report_continuous_shape=True,animated_disclosures=True,week_quota_palette=True,continuous_surface_morph=True,shared_status_glyph=True,apple_island_reference=True,panel_shrink_spring=True,panel_dismiss_spring=True,panel_shrink_ms=440,panel_dismiss_ms=360,lossless_asset_pack=self.material_store.current=='hd',lossless_asset_encoding=True,lightweight_resampling=self.material_store.current=='light',lightweight_maintenance=True,optional_webm_converter=True,shared_version_assets=True,fair_activity_targets=True,persistent_completion_ledger=True,cached_log_discovery=True,chat_incremental_stream=True,installation_ready_receipt=True,semantic_controls=True,labeled_header_actions=False,editor_keyboard_save=True,capability_health=True,connection_path_picker=True,report_scope_groups=True,report_model_filter_explicit=True,settings_draft_merge=True,settings_dirty_fields_only=True,context_menu_root_items=8,tray_recovery_menu=True,editor_returns_to_origin=True,chat_destructive_confirmation=True,quota_query_silent=True,subagent_completion_filter=True,ring_persistent_legend=False,quota_display_layout='labeled_bars',quota_reset_per_window=True,today_tokens_direct_value=True,book_reference_count=27,island_click_opens_normal=True,conversation_name_pointer_feedback=True,context_compaction_tracking=True,conversation_name_navigation=True,codex_live_status_connected=bool(self.activity and self.activity.live_reader and self.activity.live_reader.connected),daily_report_incremental_updates=True,daily_report_chart_start_after_show=True,quota_source_header_visible=False,incremental_status_refresh=True,skip_unchanged_log_reads=True,single_runtime_write=True,read_acknowledgement_history=True,read_acknowledgement_settle_seconds=4,conversation_names_visible=True,completed_conversation_background=True,independent_conversation_scroll=True,operation_status_summary=True,session_read_tracking=True,conversation_status_limit=2,codex_connection_diagnostics=True,portable_codex_discovery=True,island_bubble=True,island_quota_priority=True,bubble_mode=self.bubble.bubble_mode,bubble_auto_compact=self.bubble.auto_compact,island_visible=self.bubble.is_island(),panel_transition_stable_canvas=True,panel_transition_content_blend=True,chart_entry_animation=True,daily_report=True,daily_report_stable_surface=True,token_scan_background=True,token_models=len({r['model'] for r in report_data.get('daily_models',[])}),token_report_hours=len(report_data.get('hours',[])),daily_report_visible=bool(report and report.isVisible()),daily_report_aligned=not report or not report.isVisible() or (report.content_geometry().width()==self.bubble.width() and report.content_geometry().x()==self.bubble.x() and report.content_geometry().bottom()+1==self.bubble.y()-6),ring_center_y=None,daily_report_open=bool(self.bubble.report and self.bubble.report.requested),inline_explanations_only=True,version=VERSION,status_icon_animated=True,status_icon_unread=len(self.bubble.status_indicator.unread),status_icon_acknowledgement=True,status_icon_state=self.bubble.status_indicator.visual(),status_icon_timer=self.bubble.status_indicator.timer.isActive(),panel_transition_no_fade=True,panel_transition_staged_layout=True,panel_transition_ms=480,idle_cache_mb=round(idle_cache['bytes']/1048576,2),idle_cache_limit_mb=idle_cache['limit']/1048576,idle_cache_hits=idle_cache['hits'],integrated_panels=True,panel_page=self.bubble.panel_page,separate_panel_windows=sum(bool(p and p.isWindow()) for p in (self.settings_dialog,self.chat_window)),expanded_details_grouped=True,latin_font=LATIN_FAMILY,latin_font_loaded=register_font(),status_height_transition_ms=300,status_transition_synchronized=True,token_chart_range=self.bubble.token_range,
+        value.update(ui_revision=82,chinese_font=CHINESE_FAMILY,typography_style="noto_chakra_medium",chat_config_safe_commit=True,chat_response_formats="sse_json",chat_actionable_errors=True,panel_detached=self.settings.get("panel_detached",False),codex_exit_enabled=self.settings.get("codex_exit",False),glide_interval_ms=16,update_download_channel_fallback=True,reset_countdown_format='hours_minutes',read_terminal_turn_acknowledgement=True,reset_countdown_priority=True,customizable_capsule_shortcut=True,capsule_shortcut=self.settings['capsule_action'],codex_startup_supported=True,hourly_token_entry='today_tokens',unified_refresh=True,icon_only_header_actions=True,refresh_icon_style='single_arc',icon_motion_speed=1.2,busy_icon_style='ordered_liquid',liquid_status_family=True,status_icon_morph=True,status_waiting_live_flags=True,island_quota_segmented=False,island_quota_style='open_arc',island_quota_numeric_only=True,native_shrink_landing=True,shrink_preserves_chart_progress=True,native_landing_hold_ms=0,cached_chart_layers=True,stable_report_scrollbar=True,animated_deck_tabs=True,incremental_deck_switch=True,prewarmed_transition_landing=True,monotone_container_motion=True,status_updates_preserve_surface=True,capsule_pixel_handoff=True,atomic_transition_handoff=True,clean_report_dismiss=True,stable_disclosure_gutter=True,unified_card_motion=True,report_continuous_shape=True,animated_disclosures=True,week_quota_palette=True,continuous_surface_morph=True,shared_status_glyph=True,apple_island_reference=True,panel_shrink_spring=True,panel_dismiss_spring=True,panel_shrink_ms=440,panel_dismiss_ms=360,lossless_asset_pack=self.material_store.current=='hd',lossless_asset_encoding=True,lightweight_resampling=self.material_store.current=='light',lightweight_maintenance=True,optional_webm_converter=True,shared_version_assets=True,fair_activity_targets=True,persistent_completion_ledger=True,cached_log_discovery=True,chat_incremental_stream=True,installation_ready_receipt=True,semantic_controls=True,labeled_header_actions=False,editor_keyboard_save=True,capability_health=True,connection_path_picker=True,report_scope_groups=True,report_model_filter_explicit=True,settings_draft_merge=True,settings_dirty_fields_only=True,context_menu_root_items=8,tray_recovery_menu=True,editor_returns_to_origin=True,chat_destructive_confirmation=True,quota_query_silent=True,subagent_completion_filter=True,ring_persistent_legend=False,quota_display_layout='labeled_bars',quota_reset_per_window=True,today_tokens_direct_value=True,book_reference_count=27,island_click_opens_normal=True,conversation_name_pointer_feedback=True,context_compaction_tracking=True,conversation_name_navigation=True,codex_live_status_connected=bool(self.activity and self.activity.live_reader and self.activity.live_reader.connected),daily_report_incremental_updates=True,daily_report_chart_start_after_show=True,quota_source_header_visible=False,incremental_status_refresh=True,skip_unchanged_log_reads=True,single_runtime_write=True,read_acknowledgement_history=True,read_acknowledgement_settle_seconds=4,conversation_names_visible=True,completed_conversation_background=True,independent_conversation_scroll=True,operation_status_summary=True,session_read_tracking=True,conversation_status_limit=2,codex_connection_diagnostics=True,portable_codex_discovery=True,island_bubble=True,island_quota_priority=True,bubble_mode=self.bubble.bubble_mode,bubble_auto_compact=self.bubble.auto_compact,island_visible=self.bubble.is_island(),panel_transition_stable_canvas=True,panel_transition_content_blend=True,chart_entry_animation=True,daily_report=True,daily_report_stable_surface=True,token_scan_background=True,token_models=len({r['model'] for r in report_data.get('daily_models',[])}),token_report_hours=len(report_data.get('hours',[])),daily_report_visible=bool(report and report.isVisible()),daily_report_aligned=not report or not report.isVisible() or (report.content_geometry().width()==self.bubble.width() and report.content_geometry().x()==self.bubble.x() and report.content_geometry().bottom()+1==self.bubble.y()-6),ring_center_y=None,daily_report_open=bool(self.bubble.report and self.bubble.report.requested),inline_explanations_only=True,version=VERSION,status_icon_animated=True,status_icon_unread=len(self.bubble.status_indicator.unread),status_icon_acknowledgement=True,status_icon_state=self.bubble.status_indicator.visual(),status_icon_timer=self.bubble.status_indicator.timer.isActive(),panel_transition_no_fade=True,panel_transition_staged_layout=True,panel_transition_ms=480,idle_cache_mb=round(idle_cache['bytes']/1048576,2),idle_cache_limit_mb=idle_cache['limit']/1048576,idle_cache_hits=idle_cache['hits'],integrated_panels=True,panel_page=self.bubble.panel_page,separate_panel_windows=sum(bool(p and p.isWindow()) for p in (self.settings_dialog,self.chat_window)),expanded_details_grouped=True,latin_font=LATIN_FAMILY,latin_font_loaded=register_font(),status_height_transition_ms=300,status_transition_synchronized=True,token_chart_range=self.bubble.token_range,
             token_history_days=len(snapshot.get('history_days',{})),token_hour_slots=len(snapshot.get('hours',[])),
             mode=self.mode,action_state=self.gate.state,mouse_through=self.settings['mouse_through'],scale=self.settings['scale'],
             facing=self.walk_direction,decoder_queue=self.player.frames.qsize() if self.player else 0,first_frame_cache=len(self.player.first) if self.player else 0,
@@ -946,6 +977,8 @@ class DesktopPet(EnhancedPet):
         if self.settings_dialog and self.settings_dialog.isVisible():self.connectionHealthChanged.emit(value['connection_health'])
         atomic_json(path,value)
     def closeEvent(self,event):
+        if getattr(self,'_cleanup_job',None):
+            self._cleanup_exit_pending=True;event.ignore();return
         if hasattr(self,'materials') and not self.materials.shutdown():
             if not self._material_exit_pending:self._material_exit_pending=True;self.materials.idle.connect(self.close)
             event.ignore();return

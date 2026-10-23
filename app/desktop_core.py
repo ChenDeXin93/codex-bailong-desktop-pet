@@ -18,9 +18,16 @@ DEFAULTS=dict(schema=2,scale=1.0,playback_speed=1.0,action_gap=2.0,
 
 def atomic_json(path,value):
     path=Path(path);path.parent.mkdir(parents=True,exist_ok=True)
-    temp=path.with_name(path.name+'.tmp')
-    temp.write_text(json.dumps(value,ensure_ascii=False,indent=2),encoding='utf-8')
-    os.replace(temp,path)
+    import uuid
+    temp=path.with_name(path.name+'.'+uuid.uuid4().hex+'.tmp')
+    try:
+        temp.write_text(json.dumps(value,ensure_ascii=False,indent=2),encoding='utf-8')
+        for attempt in range(3):
+            try:os.replace(temp,path);break
+            except PermissionError:
+                if attempt==2:raise
+                time.sleep(.005*(attempt+1))
+    finally:temp.unlink(missing_ok=True)
 
 def normalized(raw):
     out=copy.deepcopy(DEFAULTS);out.update(raw if isinstance(raw,dict) else {})

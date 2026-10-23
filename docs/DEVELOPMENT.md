@@ -14,6 +14,8 @@ Git不保存大型动画。安装正式版本后，在设置中下载高清素�
 
 `python build_local.py --build-only` 完整检查并构建应用目录；`python build_local.py --deploy-verified` 实装刚验证且源码未变的构建，备份用户数据并保留回退。默认不生成公开安装器或ZIP。完整历史回归需要开发素材和夹具，干净仓库不能宣称全量708项都可直接运行。
 
+最终EXE另做离线TLS初始化自检，要求证书和主机名校验开启。构建工具会保留解释器SSL实现依赖的附属数据文件；不要用关闭验证来替代补齐运行依赖。
+
 `python build_release.py` 仅构建应用目录，不改变本机安装。公开发布时显式运行 `python build_release.py --package`，生成默认轻量载荷、程序小包及一键部署EXE；完整Windows下载ZIP还需加入部署文档并验证。`python check_bundle.py` 比对编译模块。输出与缓存不提交Git。
 
 程序小包只省略明确匹配的动画素材，所有程序/运行库/字体来自新包。软件Release须同时提供完整Windows ZIP、program.zip、program.json、合并SHA256SUMS；旧客户端首次迁移、新安装及素材不兼容使用完整包。高清按内容ID单独发布为预发布且不设Latest，不能让资源标签取代软件稳定版。
