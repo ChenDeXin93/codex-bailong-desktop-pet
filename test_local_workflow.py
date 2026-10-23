@@ -6,6 +6,19 @@ from unittest.mock import patch,Mock
 import build_local as local
 
 class LocalWorkflowTests(unittest.TestCase):
+    def test_safe_print_escapes_text_for_legacy_console_encodings(self):
+        class AsciiConsole:
+            encoding='ascii'
+            def __init__(self):self.value=''
+            def write(self,text):
+                text.encode('ascii')
+                self.value+=text
+                return len(text)
+            def flush(self):pass
+        console=AsciiConsole()
+        with patch('sys.stdout',console):local.safe_print('构建应用目录')
+        self.assertIn(r'\u6784\u5efa',console.value)
+
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory();self.root=Path(self.tmp.name)
         (self.root/'app').mkdir();(self.root/'app/example.py').write_text('answer=42')

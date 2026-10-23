@@ -10,6 +10,21 @@ sys.path[:0]=[str(ROOT/'app'),str(ROOT)]
 from desktop_core import VERSION
 from deployment_state import atomic,verify_payload
 
+def safe_print(*args,**kwargs):
+    """Escape unprintable text when a Windows console uses a legacy code page."""
+    try:
+        print(*args,**kwargs)
+    except UnicodeEncodeError:
+        stream=kwargs.get('file') or sys.stdout
+        encoding=getattr(stream,'encoding',None) or 'ascii'
+        safe_args=[]
+        for value in args:
+            value=str(value)
+            try:value.encode(encoding)
+            except UnicodeEncodeError:value=value.encode(encoding,'backslashreplace').decode(encoding)
+            safe_args.append(value)
+        print(*safe_args,**kwargs)
+
 def read(path):return json.loads(Path(path).read_text(encoding='utf-8-sig'))
 def sha(path):
     with Path(path).open('rb') as stream:return hashlib.file_digest(stream,'sha256').hexdigest()
@@ -60,7 +75,7 @@ def native_matrix(exe,label):
         proof=read(output)
         if not proof['passed'] or proof['version']!=VERSION:raise ValueError('原生交互验收未通过')
         proofs.append(proof)
-        print(f'原生交互通过：{factor}x，{proof["actions"]} 段动作，{proof["bodyPoints"]} 个人物采样点',flush=True)
+        safe_print(f'原生交互通过：{factor}x，{proof["actions"]} 段动作，{proof["bodyPoints"]} 个人物采样点',flush=True)
     return proofs
 
 def verify_tls_runtime(exe):
@@ -127,7 +142,7 @@ def main(argv=None):
             from directory_deploy import inspect_source
             inspect_source(folder,VERSION)
         else:
-            print('运行隔离回归检查…',flush=True)
+            safe_print('运行隔离回归检查…',flush=True)
             with (ROOT/'本地实装/回归检查.log').open('w',encoding='utf-8') as log:
                 subprocess.run([sys.executable,str(ROOT/'quality_check.py')],cwd=ROOT,stdout=log,stderr=subprocess.STDOUT,check=True)
             return build_and_deploy(options)
@@ -135,7 +150,7 @@ def main(argv=None):
     finally:lock.unlock()
 
 def build_and_deploy(options):
-    print('构建应用目录，不生成完整安装包…',flush=True)
+    safe_print('构建应用目录，不生成完整安装包…',flush=True)
     with (ROOT/'本地实装/应用构建.log').open('w',encoding='utf-8') as log:
         subprocess.run([sys.executable,str(ROOT/'build_release.py')],cwd=ROOT,stdout=log,stderr=subprocess.STDOUT,check=True)
     folder=ROOT/'release/BailongEnhanced'
@@ -164,7 +179,7 @@ def install_verified(proof,folder):
         proof.update(deployment=result,installed=verify_installed(result))
         proof['regression']=dict(modules=regression['modules'],tests=regression['tests'],passed=True)
         atomic(ROOT/'本地实装/最终验收.json',proof)
-        print(json.dumps(dict(version=VERSION,current=result['current'],previous=result['previous'],backup=result['backup'],fullInstallerGenerated=False,passed=True),ensure_ascii=False),flush=True)
+        safe_print(json.dumps(dict(version=VERSION,current=result['current'],previous=result['previous'],backup=result['backup'],fullInstallerGenerated=False,passed=True),ensure_ascii=False),flush=True)
     finally:deployment_lock.unlock()
     return 0
 
