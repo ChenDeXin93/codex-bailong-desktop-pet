@@ -125,7 +125,7 @@ class IndicatorTests(unittest.TestCase):
         self.icon.observe(dict(state='working',active=1));start=self.icon.busy_since
         self.icon.hide();self.assertFalse(self.icon.timer.isActive());self.now+=10
         self.icon.show();self.assertTrue(self.icon.timer.isActive());self.assertEqual(self.icon.busy_since,start)
-        self.icon.notify_complete(dict());self.icon.hide();self.now+=3;self.icon.show()
+        self.icon.notify_complete(dict(session='visible-task',turn='completed-turn'));self.icon.hide();self.now+=3;self.icon.show()
         self.assertEqual(self.icon.visual(),'attention');self.assertFalse(self.icon.timer.isActive())
     def test_only_actual_reply_in_matching_session_acknowledges(self):
         self.icon.notify_complete(dict(session='a',turn='1'))
