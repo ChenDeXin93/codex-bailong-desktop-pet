@@ -184,7 +184,7 @@ class StatusScroller(QLabel):
     def layout_title(self):
         if not self.conversation_title:self.title_width=0;return
         from conversation_roster import title_keywords
-        metrics=QFontMetrics(font(11,True));budget=min(112,round(self.width()*.42))
+        metrics=QFontMetrics(font(12,True));budget=min(112,round(self.width()*.42))
         self.short_title=metrics.elidedText(title_keywords(self.conversation_title),Qt.TextElideMode.ElideMiddle,max(1,budget-metrics.horizontalAdvance(self.title_suffix)))+self.title_suffix
         self.title_width=metrics.horizontalAdvance(self.short_title)
     def set_conversations(self,items,extra=0,full=False,metadata=None):
@@ -284,7 +284,7 @@ class StatusScroller(QLabel):
                 p.setRenderHint(QPainter.RenderHint.Antialiasing);p.setPen(QPen(QColor('#806095' if self.name_pressed else '#a087b3'),1))
                 p.setBrush(QColor('#c5add9' if self.name_pressed else '#dfcfeb'));p.drawRoundedRect(QRectF(1,1,left-4,self.height()-2),4,4)
             offset=1 if self.name_pressed else 0
-            title_font=font(11,True);title_font.setUnderline(self.name_hovered or self.name_pressed)
+            title_font=font(12,True);title_font.setUnderline(self.name_hovered or self.name_pressed)
             p.setFont(title_font);p.setPen(QColor('#30203e' if self.name_pressed else '#472c5d' if self.name_hovered else '#665078'))
             p.drawText(QRectF(5+offset,offset,self.title_width,self.height()),Qt.AlignmentFlag.AlignVCenter,self.short_title)
             p.setPen(QColor('#c1b4cc'));p.drawLine(left-5,5,left-5,self.height()-5)
@@ -394,7 +394,8 @@ class CompactBubble(Bubble):
         self.windows=[];self.status='已启动，正在连接 Codex…';self.heading='白龙 · Codex 桌面伙伴'
         self.quota_caption='额度加载中…';self.reset_snapshot=None;self.reset_feed_error=False;self.reset_error_details=None
         self.show_quota=True;self.enabled=True;self.expanded=False
-        self.bubble_mode='auto';self.auto_compact=False;self.last_task_update=time.monotonic();self.codex_open=None
+        self.bubble_mode='auto';self.auto_compact=False;self._minimal_normal_open=False;self._last_compact_surface=None
+        self.last_task_update=time.monotonic();self.codex_open=None
         self._manual_grace_until=0.;self._pending_mode=None;self._pending_navigation=None
         self.quota_busy=False;self.reset_busy=False;self.pinned=True;self.wandering=True;self.movement_locked=False
         self.quota_refresh_button=None;self.reset_refresh_buttons=[];self.token_refresh_buttons=[];self.token_busy=False
@@ -456,19 +457,23 @@ class CompactBubble(Bubble):
     def return_to_status(self):
         if self.size_transition.running:self._pending_navigation=('return',None);self._pending_mode=None;return
         if self.panel_page=='status':return
-        origin=self._editor_origin or dict(expanded=False,bubble_mode=self.bubble_mode,auto_compact=self.auto_compact)
+        origin=self._editor_origin or dict(expanded=False,bubble_mode=self.bubble_mode,auto_compact=self.auto_compact,
+                                           minimal_normal_open=self._minimal_normal_open)
         self.size_transition.begin();self.panel_page='status';self.expanded=origin['expanded']
         self.bubble_mode=origin['bubble_mode'];self.auto_compact=origin['auto_compact']
+        self._minimal_normal_open=origin.get('minimal_normal_open',False)
         self._editor_origin=None;self._editor_positioned=False;self._manual_grace_until=time.monotonic()+15
         self._editing_flags(False);self.redraw();self.size_transition.commit()
     def collapse_to_normal(self):
-        self.set_mode('auto')
+        if self.bubble_mode=='minimal':self.open_normal_from_minimal()
+        else:self.set_mode('auto')
     def show_page(self,key,widget):
         if self.size_transition.running:self._pending_navigation=(key,widget);self._pending_mode=None;return
         if self.report:self.report.dismiss()
         self.size_transition.begin()
         entering=self.panel_page=='status'
-        if entering:self._editor_origin=dict(expanded=self.expanded,bubble_mode=self.bubble_mode,auto_compact=self.auto_compact)
+        if entering:self._editor_origin=dict(expanded=self.expanded,bubble_mode=self.bubble_mode,
+                                             auto_compact=self.auto_compact,minimal_normal_open=self._minimal_normal_open)
         if self.editor_stack.indexOf(widget)<0:self.editor_stack.addWidget(widget)
         self.editor_stack.setCurrentWidget(widget);widget.show();self.panel_page=key;self.expanded=True
         if entering:self._editor_positioned=False
@@ -494,6 +499,7 @@ class CompactBubble(Bubble):
         return toolbar
     def _redraw_editor(self):
         self._redrawing=True
+        self._last_compact_surface=None
         self.layout.setContentsMargins(10,6,10,6);self.layout.setSpacing(3)
         if self.layout.indexOf(self.editor_stack)<0:
             if self.details_tabs:self.detail_scroll={key:area.verticalScrollBar().value() for key,area in self.details_tabs.areas.items()}
@@ -649,6 +655,7 @@ class CompactBubble(Bubble):
         if self.panel_page!='status':self._redraw_editor();return
         if self.is_minimal():self._redraw_minimal();return
         if self.is_island():self._redraw_island();return
+        self._last_compact_surface=None
         self._redrawing=True
         if self.details_tabs:
             self.detail_scroll={key:area.verticalScrollBar().value() for key,area in self.details_tabs.areas.items()}
@@ -674,7 +681,9 @@ class CompactBubble(Bubble):
         self.quota_refresh_button=self.refresh_button;row.addWidget(self.refresh_button);self.refresh_button.show()
         report_button=action_button('report','打开 / 收起 Token 日报',hit_size=28);report_button.setObjectName('bubble_report')
         report_button.clicked.connect(self.reportRequested.emit);row.addWidget(report_button)
-        mini=action_button('compact','固定为缩小模式',hit_size=28);mini.setObjectName('bubble_compact');mini.clicked.connect(lambda:self.set_mode('mini'));row.addWidget(mini)
+        compact_target='minimal' if self.bubble_mode=='minimal' else 'mini'
+        mini=action_button('compact','收起到极简模式' if compact_target=='minimal' else '收起到胶囊模式',hit_size=28)
+        mini.setObjectName('bubble_compact');mini.clicked.connect(lambda:self.set_mode(compact_target));row.addWidget(mini)
         button=action_button('collapse' if self.expanded else 'details','收起详情' if self.expanded else '展开完整状态、来源与重置说明',hit_size=28)
         button.clicked.connect(self.toggle_details);row.addWidget(button);self.add(header)
         self._header=header;self._header_actions=[self.refresh_button,report_button,mini,button];self._update_header()
@@ -729,22 +738,31 @@ class CompactBubble(Bubble):
     def host_visible(self):
         owner=self.owner_pet()
         return owner is None or (owner.card_surface_visible() if hasattr(owner,'card_surface_visible') else owner.isVisible())
-    def is_minimal(self):return self.panel_page=='status' and not self.expanded and self.bubble_mode=='minimal'
+    def is_minimal(self):return self.panel_page=='status' and not self.expanded and self.bubble_mode=='minimal' and not self._minimal_normal_open
     def is_compact(self):return self.is_island() or self.is_minimal()
     def is_island(self):return self.panel_page=='status' and not self.expanded and (self.bubble_mode=='mini' or self.auto_compact)
     def set_mode(self,mode):
         if mode not in ('auto','mini','minimal'):raise ValueError('未知的卡片显示模式')
         if self.size_transition.running:self._pending_mode=mode;self._pending_navigation=None;return
-        self.size_transition.begin();self.bubble_mode=mode;self.auto_compact=False;self.expanded=False;self.panel_page='status';self._editor_origin=None
+        self.size_transition.begin();self.bubble_mode=mode;self.auto_compact=False;self._minimal_normal_open=False
+        self.expanded=False;self.panel_page='status';self._editor_origin=None
         self.last_task_update=time.monotonic();self._manual_grace_until=self.last_task_update+15
         if self.report:self.report.dismiss()
         self._editing_flags(False);self.redraw();self.size_transition.commit();self.modeChanged.emit(mode)
+    def open_normal_from_minimal(self):
+        """Temporarily open the card while keeping minimal as its compact shape."""
+        if self.size_transition.running:self._pending_navigation=('minimal_normal',None);self._pending_mode=None;return
+        self.size_transition.begin();self._minimal_normal_open=True;self.auto_compact=False
+        self.expanded=False;self.panel_page='status';self._editor_origin=None
+        self.last_task_update=time.monotonic();self._manual_grace_until=self.last_task_update+15
+        if self.report:self.report.dismiss()
+        self._editing_flags(False);self.redraw();self.size_transition.commit()
     def _apply_pending_mode(self):
         mode=self._pending_mode;nav=self._pending_navigation;self._pending_mode=None;self._pending_navigation=None
         if mode:self.set_mode(mode);return
         if nav:
             key,value=nav
-            callback=(lambda:self.toggle_details()) if key=='toggle' else self.return_to_status if key=='return' else (lambda:self.show_status(value)) if key=='status' else (lambda:self.show_page(key,value))
+            callback=(lambda:self.toggle_details()) if key=='toggle' else self.return_to_status if key=='return' else self.open_normal_from_minimal if key=='minimal_normal' else (lambda:self.show_status(value)) if key=='status' else (lambda:self.show_page(key,value))
             callback()
     def keyPressEvent(self,event):
         if event.key()==Qt.Key.Key_Escape:
@@ -761,7 +779,12 @@ class CompactBubble(Bubble):
         self.evaluate_mode()
     def evaluate_mode(self,now=None):
         now=time.monotonic() if now is None else now
-        if self.bubble_mode!='auto' or self.panel_page!='status' or self.expanded or (self.report and self.report.requested) or self.size_transition.running:return
+        if self.panel_page!='status' or self.expanded or (self.report and self.report.requested) or self.size_transition.running:return
+        if self.bubble_mode=='minimal':
+            if self._minimal_normal_open and now>=self._manual_grace_until and (now-self.last_task_update>=90 or self.codex_open is False):
+                self.size_transition.begin();self._minimal_normal_open=False;self.redraw();self.size_transition.commit()
+            return
+        if self.bubble_mode!='auto':return
         compact=now>=self._manual_grace_until and (now-self.last_task_update>=90 or self.codex_open is False)
         if compact==self.auto_compact:return
         self.size_transition.begin();self.auto_compact=compact;self.redraw();self.size_transition.commit()
@@ -780,6 +803,7 @@ class CompactBubble(Bubble):
     def _redraw_island(self):
         from island_widgets import StatusIsland,QuotaSatellite,WIDTH,HEIGHT
         self._redrawing=True
+        entering=self._last_compact_surface!='mini';self._last_compact_surface='mini'
         if self.details_tabs:self.detail_scroll={key:area.verticalScrollBar().value() for key,area in self.details_tabs.areas.items()}
         self.clear();self.details_tabs=None;self.status_view.animation.stop();self.status_view.hide()
         self.quota_refresh_button=None;self.reset_refresh_buttons=[];self.token_refresh_buttons=[]
@@ -801,24 +825,32 @@ class CompactBubble(Bubble):
         self.island.expand.connect(lambda:self.set_mode('auto'));row.addWidget(self.island)
         if self.show_quota:
             quota=QuotaSatellite(self.windows,self.quota_caption);quota.clicked.connect(self.toggle_details)
+            if entering:quota.begin_reveal()
             quota.resetDue.connect(self._quota_reset_due);row.addWidget(quota)
         self.add(cluster);self._redrawing=False;self._fit_height()
         owner=self.owner_pet()
         if self.enabled and self.host_visible():self.show()
         elif self.host_visible():self.size_transition.dismiss()
         else:self.hide()
+        if self.show_quota and entering and not self.size_transition.preparing and not self.size_transition.running:
+            QTimer.singleShot(0,quota,quota.start_reveal)
         self._position_now()
     def _redraw_minimal(self):
         from island_widgets import MinimalQuota
-        self._redrawing=True;self.clear();self.details_tabs=None;self.status_view.animation.stop();self.status_view.hide()
+        self._redrawing=True
+        entering=self._last_compact_surface!='minimal';self._last_compact_surface='minimal'
+        self.clear();self.details_tabs=None;self.status_view.animation.stop();self.status_view.hide()
         self.quota_refresh_button=None;self.reset_refresh_buttons=[];self.token_refresh_buttons=[]
-        self.layout.setContentsMargins(0,0,0,0);self.layout.setSpacing(0);self.content.setFixedWidth(68)
+        self.layout.setContentsMargins(0,0,0,0);self.layout.setSpacing(0);self.content.setFixedWidth(54)
         self.minimal_quota=MinimalQuota(self.windows,self.quota_caption,self)
-        self.minimal_quota.clicked.connect(lambda:self.set_mode('auto'));self.minimal_quota.resetDue.connect(self._quota_reset_due)
+        self.minimal_quota.clicked.connect(self.open_normal_from_minimal);self.minimal_quota.resetDue.connect(self._quota_reset_due)
+        if entering:self.minimal_quota.begin_reveal()
         self.add(self.minimal_quota);self._redrawing=False;self._fit_height()
         if self.enabled and self.host_visible():self.show()
         elif self.host_visible():self.size_transition.dismiss()
         else:self.hide()
+        if entering and not self.size_transition.preparing and not self.size_transition.running:
+            QTimer.singleShot(0,self.minimal_quota,self.minimal_quota.start_reveal)
         self._position_now()
     def _status_height_changed(self):
         if not self._redrawing and self.panel_page=='status':

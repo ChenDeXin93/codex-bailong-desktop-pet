@@ -70,4 +70,25 @@ class TokenTests(unittest.TestCase):
         self.assertEqual(sum(r['hours']),r['days'][r['today']])
         self.path.unlink();self.assertEqual(self.index.poll(self.now)['hours'],r['hours'])
 
+    def test_locked_legacy_database_is_retried_after_lock_releases(self):
+        from token_analytics import migrate
+        with closing(sqlite3.connect(self.cache)) as old,old:
+            old.execute('CREATE TABLE files(path TEXT PRIMARY KEY,offset INTEGER,highwater INTEGER)')
+            old.execute('CREATE TABLE usage(fingerprint TEXT PRIMARY KEY,stamp REAL,tokens INTEGER)')
+            migrate(old)
+            old.execute('INSERT INTO files(path,offset,highwater,session) VALUES(?,0,0,?)',(str(self.path),'legacy-session'))
+            old.execute('INSERT INTO usage(fingerprint,stamp,tokens,session) VALUES(?,?,?,?)',('legacy',self.now,123,'legacy-session'))
+        lock=sqlite3.connect(self.cache,timeout=0)
+        try:
+            lock.execute('BEGIN EXCLUSIVE')
+            with closing(self.index.connect()) as db:
+                self.assertFalse(db.execute('SELECT 1 FROM source_identity').fetchone())
+                self.assertTrue(self.index.legacy_import_pending)
+        finally:
+            lock.rollback();lock.close()
+        with closing(self.index.connect()) as db:
+            self.assertEqual(self.index.snapshot(db,self.now)['all_total'],123)
+            self.assertTrue(db.execute('SELECT 1 FROM source_identity').fetchone())
+            self.assertFalse(self.index.legacy_import_pending)
+
 if __name__=='__main__':unittest.main()

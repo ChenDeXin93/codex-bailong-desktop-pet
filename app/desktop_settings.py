@@ -106,11 +106,11 @@ class SettingsDialog(QDialog):
     def build_page_1(self):
         pet=self.pet
         behavior=self.tab('人物与动作')
-        self.section(behavior,'位置与移动','人物锁定仅限制人物；分离后的面板仍可独立拖动。')
+        self.section(behavior,'位置与移动',None)
         self.number(behavior,'scale','角色大小（倍）',.4,2.5,.1)
         self.check(behavior,'no_move','锁定人物位置（禁止拖动和自主走动）')
         self.check(behavior,'wandering','允许自主走动（不影响手动拖动）')
-        self.movement_note=QLabel();self.movement_note.setWordWrap(True);behavior.addRow(self.movement_note)
+        self.check(behavior,'wander_horizontal_only','自主走动仅水平')
         self.check(behavior,'drag_physics','松手后惯性滑行与反弹')
         self.section(behavior,'动作与声音','自动动作静音；只在你主动点击或手动播放时使用音效。')
         self.check(behavior,'random_actions','自动随机动作')
@@ -118,7 +118,7 @@ class SettingsDialog(QDialog):
         self.advanced_button=QPushButton('展开高级动作参数');self.advanced_button.setCheckable(True);behavior.addRow(self.advanced_button)
         advanced=QWidget();advanced_form=QFormLayout(advanced);advanced_form.setContentsMargins(0,0,0,0)
         for key,title,lo,hi,step in [('playback_speed','播放速度（倍）',.25,3,.25),('action_gap','动作结束后等待（秒）',0,60,1),('random_interval','自主动作间隔（秒）',3,600,1),('move_speed','自主走动速度（像素/秒）',10,300,5)]:self.number(advanced_form,key,title,lo,hi,step)
-        self.number(advanced_form,'move_range','自主活动范围',.1,1,.1,factor=100,suffix='% 屏幕')
+        self.number(advanced_form,'move_range','自主走动幅度',.1,1,.1,factor=100,suffix='%')
         self.advanced_card=AnimatedDisclosure(advanced);behavior.addRow(self.advanced_card)
         self.advanced_button.toggled.connect(self.advanced_card.set_expanded)
         self.advanced_button.toggled.connect(lambda checked:self.advanced_button.setText('收起高级动作参数' if checked else '展开高级动作参数'))
@@ -207,11 +207,12 @@ class SettingsDialog(QDialog):
         self.section(maintenance,'诊断与数据','维护操作立即执行；不属于设置草稿。')
         for title,slot in [('打开配置与聊天记录目录',pet.open_data),('导出诊断报告（不含对话和密钥）',pet.export_diagnostics),('备份设置（不含密钥与对话）',pet.backup_settings),('恢复设置备份',pet.restore_settings),('清理历史版本与备份（先预览）',pet.cleanup_installations)]:
             button=QPushButton(title);button.clicked.connect(slot);maintenance.addRow(button)
-        maintenance.addRow(QLabel('版本 '+VERSION+' · 旧配置自动迁移，退出后保存位置和朝向'))
+        maintenance.addRow(QLabel('当前版本 '+VERSION))
 
     def section(self,form,title,note):
         name=QLabel(title);name.setStyleSheet(f'font-size:13px;font-weight:500;color:{PRIMARY};background:#eae3f0;border-radius:6px;padding:6px;margin-top:6px;');form.addRow(name)
-        label=QLabel(note);label.setWordWrap(True);label.setStyleSheet(f'font-size:11px;color:{MUTED};margin-bottom:3px;');form.addRow(label)
+        if note:
+            label=QLabel(note);label.setWordWrap(True);label.setStyleSheet(f'font-size:11px;color:{MUTED};margin-bottom:3px;');form.addRow(label)
     def choose_path(self,key):
         if key=='home':value=QFileDialog.getExistingDirectory(self,'选择 Codex 数据目录',self.path_fields[key].text())
         else:value,_=QFileDialog.getOpenFileName(self,'选择 Codex CLI（不是桌面主程序）',self.path_fields[key].text(),'程序 (*.exe);;所有文件 (*)')
@@ -301,7 +302,7 @@ class SettingsDialog(QDialog):
         if self.draft is None:return
         self.website.setEnabled(self.shortcut.currentData()=='website')
         count=len(self.draft.dirty);self.apply_button.setEnabled(bool(count));self.discard_button.setEnabled(bool(count))
-        text=f'有 {count} 项未保存修改 · Ctrl+S 应用 · 切页保留草稿' if count else '设置已保存 · Ctrl+S 应用修改'
+        text=f'{count} 项未保存，Ctrl+S 应用' if count else '设置已保存'
         if self.draft.conflicts:
             names='、'.join(self.field_titles[k] for k in sorted(self.draft.conflicts))
             text+='\n外部也修改了：'+names+'。应用将采用此处草稿；放弃修改将采用当前值。'
@@ -309,8 +310,9 @@ class SettingsDialog(QDialog):
         self.defaults_button.setEnabled(any(tab==self.tabs.currentIndex() and key in DEFAULTS for key,tab in self.field_tabs.items()))
         if 'no_move' in self.fields:
             locked=self.fields['no_move'].isChecked()
-            for key in ('wandering','drag_physics','move_speed','move_range'):self.fields[key].setEnabled(not locked)
-            self.movement_note.setText('位置已锁定：禁止拖动和自主走动；下方移动偏好会保留，解除锁定后恢复。' if locked else '自主走动关闭时仍可手动拖动；工作动作优先于自动随机动作。')
+            walking=self.fields['wandering'].isChecked() and not locked
+            for key in ('wandering','drag_physics'):self.fields[key].setEnabled(not locked)
+            for key in ('wander_horizontal_only','move_speed','move_range'):self.fields[key].setEnabled(walking)
         if 'status_actions' in self.fields:self.fields['status_action_interval'].setEnabled(self.fields['status_actions'].isChecked())
         if 'self_talk' in self.fields:
             talking=self.fields['self_talk'].isChecked()

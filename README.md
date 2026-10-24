@@ -2,9 +2,19 @@
 
 ![文章海报](docs/media/cover.png)
 
-一只陪你使用 Codex 的 Windows 白龙桌宠：在桌面查看任务状态、接收完成提醒、追踪账户额度和 Token 用量。基于 [jingh12312-rgb/bailong-desktop-pet](https://github.com/jingh12312-rgb/bailong-desktop-pet) 持续改造，当前版本 **v0.9.3 / UI82**。
+一只陪你使用 Codex 的 Windows 白龙桌宠：在桌面查看任务状态、接收完成提醒、追踪账户额度和 Token 用量。基于 [jingh12312-rgb/bailong-desktop-pet](https://github.com/jingh12312-rgb/bailong-desktop-pet) 持续改造，当前版本 **v0.9.9 / UI87**。
 
 **[下载安装包](https://github.com/Wunsch2048/codex-bailong-desktop-pet/releases/latest)** · [快速部署](docs/快速部署说明.txt) · [全部新增功能](docs/新增功能说明.txt) · [开发说明](docs/DEVELOPMENT.md) · [迭代历史](docs/迭代历史.txt)
+
+### v0.9.9 更新
+
+- 修复任务结束后迟到的同回合日志把状态重新改为“进行中”，或把中断、失败误改为完成的问题（[#3](https://github.com/Wunsch2048/codex-bailong-desktop-pet/issues/3)）。
+- 旧 Token 数据库暂时不可读时保留迁移待重试状态，下一次刷新继续尝试，避免历史统计静默缺失（[#4](https://github.com/Wunsch2048/codex-bailong-desktop-pet/issues/4)）。
+- 编辑消息形成的日志分支归回原对话，清理无法跳转的重复条目与没有回合编号的旧提醒。
+- 极简模式可临时展开正常卡片并返回；胶囊与极简额度圆保持原有配色、背景和字体，只加入进场填充。自主走动围绕手动放置点，默认仅水平移动。
+- 状态水球改为穿插与快转交替，待机缓慢旋转；减少静置图标卡顿，修复持续工作动作里笔记本反复开合。
+
+完整变化、安装方式及已知反馈见 [v0.9.9 更新说明](docs/releases/v0.9.9.md)。目前仅提供 Windows x64 包；[macOS 移植提议](https://github.com/Wunsch2048/codex-bailong-desktop-pet/issues/5)与[ Linux 支持请求](https://github.com/Wunsch2048/codex-bailong-desktop-pet/issues/2)尚未合入。
 
 ### v0.9.3 更新（水球状态图标与浅色主题）
 

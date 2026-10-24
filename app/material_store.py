@@ -29,6 +29,7 @@ def hash_file(path,cancel=lambda:False):
 
 class MaterialStore:
     def __init__(self,app_root,state_dir):
+        self._known_availability={}
         self.app_root=Path(app_root);self.state=Path(state_dir);self.base=self.app_root/'outputs/白龙桌宠素材'
         self.cache=self.state/'materials';self.preference=self.state/'material-preferences.json'
         catalog_path=self.app_root/'app/material_catalog.json'
@@ -47,7 +48,10 @@ class MaterialStore:
         # Development assets are originals; frozen base is always the light tier.
         self.development=not getattr(__import__('sys'),'frozen',False) and (self.app_root/'build/materials/light/素材清单.json').is_file()
         if self.development:self.root=self.app_root/'build/materials/light'
-        if self.catalog and self.preferred=='hd' and self.available('hd'):
+        # Establish display-only availability before the animated UI starts.
+        # Runtime/settings snapshots must never rescan all material paths.
+        self.available('light');hd_ready=self.available('hd')
+        if self.catalog and self.preferred=='hd' and hd_ready:
             self.root=self.tier_root('hd');self.current='hd'
 
     def tier_root(self,tier):
@@ -55,6 +59,15 @@ class MaterialStore:
         return checked(self.cache,'hd/'+self.catalog['tiers']['hd']['id'])
 
     def available(self,tier):
+        result=self._check_available(tier)
+        self._known_availability[tier]=result
+        return result
+
+    def known_available(self,tier):
+        """Last checked display hint only; never authorizes activation or reuse."""
+        return self._known_availability.get(tier,False)
+
+    def _check_available(self,tier):
         if not self.catalog:return tier=='hd'
         root=self.tier_root(tier)
         if tier=='light':return (root/'素材清单.json').is_file()
@@ -104,6 +117,7 @@ class MaterialStore:
             if self.available('hd'):return
             raise MaterialError('已有高清缓存损坏，请退出桌宠后清理该缓存再重试')
         stage.replace(target)
+        self._known_availability['hd']=True
 
     def ensure(self,tier,cancel=lambda:False,progress=lambda n,t,p:None,opener=None):
         if not self.catalog:raise MaterialError('当前版本没有可切换的素材目录')

@@ -132,7 +132,7 @@ class PanelTransition(QObject):
         for widget in widgets:
             if not self.shrinking and widget.isVisibleTo(b.content) and hasattr(widget,'begin_reveal'):widget.begin_reveal()
         ratio=b.devicePixelRatioF();size=b.content.size()
-        image=QPixmap(pixel_size(size.width(),ratio),pixel_size(size.height(),ratio));image.setDevicePixelRatio(ratio);image.fill(Qt.GlobalColor.transparent if b.is_island() else QColor('#fcfafc'))
+        image=QPixmap(pixel_size(size.width(),ratio),pixel_size(size.height(),ratio));image.setDevicePixelRatio(ratio);image.fill(Qt.GlobalColor.transparent if b.is_compact() else QColor('#fcfafc'))
         b.content.render(image,QPoint(),QRegion(),QWidget.RenderFlag.DrawChildren)
         self.cover.image=image
         self.morph=SurfaceMorph(self.old_surface,SurfaceState.capture(b,target.topLeft()))

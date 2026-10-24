@@ -5,7 +5,7 @@ import json,sqlite3,tempfile,unittest
 from pathlib import Path
 from PySide6.QtWidgets import QApplication
 from enhanced_core import ActivityReducer,RolloutTail
-from session_read_state import is_subagent_metadata,subagent_sessions
+from session_read_state import is_subagent_metadata,subagent_sessions,rollout_alias
 from status_indicator import StatusIndicator
 
 APP=QApplication.instance() or QApplication([])
@@ -66,6 +66,19 @@ class ChildProvenanceTests(unittest.TestCase):
                 for row in (event('task_started','followup'),event('task_complete','followup')):stream.write(json.dumps(row)+'\n')
             self.assertEqual(tail.poll(),[])
 
+    def test_edited_root_rollout_uses_the_parent_chat_identity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home=Path(directory);(home/'sessions').mkdir()
+            path=home/'sessions'/('rollout-2026-10-25T02-10-51-'+PARENT+'_'+CHILD+'.jsonl')
+            started=event('task_started');started['payload']['turn_attribution']=dict(turn_trigger='edit_user_message',initiating_agent_path=None,parent_turn_id=None)
+            path.write_text(''.join(json.dumps(row)+'\n' for row in (meta(PARENT),started,event('task_complete'))),encoding='utf-8')
+            self.assertEqual(rollout_alias(path),PARENT)
+            tail=RolloutTail(home);tail.poll()
+            self.assertNotIn(path.stem,tail.reducer.sessions)
+            self.assertIn(PARENT,tail.reducer.sessions)
+            with path.open('a',encoding='utf-8') as stream:stream.write(json.dumps(event('task_started','later'))+'\n')
+            self.assertTrue(any(e.get('session')==PARENT for e in tail.poll()))
+
 
 class StoredChildReminderTests(unittest.TestCase):
     def setUp(self):
@@ -101,6 +114,13 @@ class StoredChildReminderTests(unittest.TestCase):
     def test_only_stuck_child_notices_restore_to_idle_without_checkmark(self):
         self.store.write_text(json.dumps(dict(unread=[[CHILD,'done']],seen=[[CHILD,'done']])),encoding='utf-8')
         icon=self.restore();self.assertFalse(icon.unread);self.assertEqual(icon.visual(),'idle')
+    def test_blank_turn_cannot_leave_an_unacknowledgeable_notice(self):
+        self.store.write_text(json.dumps(dict(unread=[['orphan',''],[PARENT,'done']],seen=[])),encoding='utf-8')
+        icon=self.restore()
+        self.assertEqual(icon.unread,[(PARENT,'done')])
+        self.assertIn(('orphan',''),icon.seen)
+        self.assertFalse(icon.notify_complete(dict(session='orphan',turn='')))
+        self.assertEqual(json.loads(self.store.read_text(encoding='utf-8'))['unread'],[[PARENT,'done']])
     def test_unavailable_metadata_never_removes_normal_pending_notices(self):
         self.store.write_text(json.dumps(dict(unread=[[PARENT,'done']],seen=[])),encoding='utf-8')
         self.db.execute('DROP TABLE threads');self.db.commit()

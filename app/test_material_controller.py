@@ -15,6 +15,12 @@ def until(check):
     return check()
 
 class MaterialControllerTests(unittest.TestCase):
+    def test_ui_snapshots_and_progress_never_rescan_material_files(self):
+        with patch.object(self.store,'available',side_effect=AssertionError('UI performed disk scan')):
+            for _ in range(12):
+                self.assertTrue(self.c.snapshot()['hdCached'])
+                self.c._progress(1,2,'verifying')
+                self.panel.refresh(self.c.snapshot())
     def test_unstarted_player_resize_during_hidden_material_switch(self):
         from stream_player import StreamPlayer
         player=StreamPlayer();self.assertIsNone(player.resize(308));player.close()

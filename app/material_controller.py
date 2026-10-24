@@ -27,12 +27,12 @@ class MaterialController(QObject):
         super().__init__(parent);self.store=store;self.job=None;self.closing=False
         self.state=dict(phase='idle',message='',downloaded=0,total=0)
     def snapshot(self):
-        return dict(self.state,current=self.store.current,hdCached=self.store.available('hd'),supported=bool(self.store.catalog),busy=self.job is not None)
+        return dict(self.state,current=self.store.current,hdCached=self.store.known_available('hd'),supported=bool(self.store.catalog),busy=self.job is not None)
     def publish(self,**changes):self.state.update(changes);self.changed.emit(self.snapshot())
     def request(self,tier):
         if self.closing or self.job or self.state['phase']=='pending' or tier not in ('light','hd'):return False
         if tier==self.store.current:self.publish(message='当前已使用所选画质');return False
-        self.publish(phase='verifying' if self.store.available(tier) else 'downloading',message='正在准备素材…',downloaded=0,total=0)
+        self.publish(phase='verifying' if self.store.known_available(tier) else 'downloading',message='正在准备素材…',downloaded=0,total=0)
         job=self.job=MaterialJob(self.store,tier,self);job.result.connect(self._result);job.failed.connect(lambda text:self.publish(phase='error',message=text));job.progress.connect(self._progress);job.finished.connect(self._finished);self.changed.emit(self.snapshot());job.start();return True
     def _progress(self,n,total,phase):
         if not self.closing:self.publish(phase=phase,downloaded=n,total=total,message='正在下载高清素材…' if phase=='downloading' else '正在校验素材…')

@@ -8,6 +8,19 @@ from material_store import MaterialStore,MaterialError,checked
 from app_updates import UpdateCancelled
 
 class MaterialStoreTests(unittest.TestCase):
+    def test_cached_display_hint_does_not_authorize_corrupt_materials(self):
+        root=self.store.import_hd(self.source)
+        self.assertTrue(self.store.known_available('hd'))
+        with patch.object(self.store,'_check_available',side_effect=AssertionError('unexpected scan')):
+            self.assertTrue(self.store.known_available('hd'))
+        (root/'quality/action.webp').write_bytes(b'damaged')
+        with self.assertRaises(MaterialError):self.store.activate('hd',root)
+        self.assertFalse(self.store.known_available('hd'))
+        self.assertEqual(self.store.current,'light')
+    def test_cached_hint_is_initialized_for_existing_hd_even_when_using_light(self):
+        self.store.import_hd(self.source)
+        other=MaterialStore(self.app,self.state)
+        self.assertEqual(other.current,'light');self.assertTrue(other.known_available('hd'))
     def test_default_runtime_log_is_outside_immutable_program_payload(self):
         from quota import log_attempt
         with tempfile.TemporaryDirectory() as folder,patch.dict('os.environ',{'LOCALAPPDATA':folder}),patch('sys.frozen',True,create=True),patch('sys.executable',str(Path(folder)/'immutable-program/pet.exe')):
