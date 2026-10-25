@@ -8,13 +8,22 @@
 
 安装器不含人物动画，新用户先获得卡片程序，可在设置中下载；已有素材和设置保留。
 
+## 社区版本
+
+| 平台 | 入口与维护者 | 当前说明的支持范围 |
+| --- | --- | --- |
+| Linux / Niri | [helantianshen 的社区仓库](https://github.com/helantianshen/codex-bailong-desktop-pet#linux--niri) | CachyOS、Niri、Wayland；其他桌面环境请查看作者最新说明 |
+| macOS | [社区移植讨论](https://github.com/Wunsch2048/codex-bailong-desktop-pet/issues/5) | 作者正在整理独立维护入口，暂不提供本仓库的 Mac 安装包 |
+
+社区版本由对应作者独立维护、测试和发布，安装说明与平台问题反馈请前往对应仓库。主仓库发布的安装包和更新补丁适用于 Windows x64。
+
 ### v1.0.1 程序补丁
 
 - 额度对比按用量、总量变化和历史图分区，区分 5 个百分点估算门槛与 20 个百分点对比条件，完整规则按需展开。
 - 新增 [WSL Codex 接入](docs/WSL.md)，支持 Linux 日志、Token 与 CLI 额度查询；真实 WSL 实机验证仍待反馈。
 - 补齐程序与动画补丁的独立更新流程，修复额度对比切回概览时面板变短。
 
-[完整更新说明](docs/releases/v1.0.1.md)。本次仅 Windows x64，Mac 移植尚在审查。
+[完整更新说明](docs/releases/v1.0.1.md)。本次发布包适用于 Windows x64；其他平台请查看上方社区版本入口。
 
 ![额度对比新排版](docs/media/quota-compare-1.0.1.png)
 
@@ -26,7 +35,7 @@
 - 支持仅安装卡片；动画可单独下载、启用或移除。
 - 提供完整 Windows 安装包、应用内程序更新包、仅卡片安装包和独立轻量动画资源。
 
-完整变化与安装方式见 [v1.0.0 更新说明](docs/releases/v1.0.0.md)。目前提供 Windows x64 版本；[macOS 移植提议](https://github.com/Wunsch2048/codex-bailong-desktop-pet/issues/5)与[ Linux 支持请求](https://github.com/Wunsch2048/codex-bailong-desktop-pet/issues/2)尚未合入。
+完整变化与安装方式见 [v1.0.0 更新说明](docs/releases/v1.0.0.md)。主仓库提供 Windows x64 版本；Linux 社区版和 macOS 移植信息见上方入口。
 ## 桌面上可以做什么
 
 | 功能 | 实际表现 |
