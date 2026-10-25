@@ -1,6 +1,6 @@
 # 接入 WSL 内的 Codex
 
-对应 [Issue #6](https://github.com/Wunsch2048/codex-bailong-desktop-pet/issues/6)。这是 Windows 桌宠连接本机 WSL 内的 Codex，不是 Linux 原生桌宠版本。当前 main 已实现此接入方式，候选程序补丁 1.0.1 尚未公开发布；当前安装包 v1.0.0 不包含 WSL 接入。实机验证边界见本文末尾。
+对应 [Issue #6](https://github.com/Wunsch2048/codex-bailong-desktop-pet/issues/6)。这是 Windows 桌宠连接本机 WSL 内的 Codex，不是 Linux 原生桌宠版本。公开程序补丁包 1.0.1 已加入此接入方式；旧版 v1.0.0 不包含 WSL 接入。实机验证边界见本文末尾。
 
 ## 设置
 
