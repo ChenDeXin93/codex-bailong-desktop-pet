@@ -12,7 +12,7 @@ def package(source,destination):
     catalog=json.loads((source/'app/material_catalog.json').read_text(encoding='utf-8'));tier=catalog['tiers']['light']
     media={PREFIX+f['path']:dict(bytes=f['bytes'],sha256=f['sha256']) for f in tier['files']}
     if {n:f for n,f in manifest['files'].items() if n.startswith(PREFIX)}!=media:raise ValueError('素材目录与载荷不一致')
-    descriptor=dict(schema=1,kind='program',version=version,materialId=tier['id'])
+    descriptor=dict(schema=1,kind='program',version=version,materialId=tier['id'],optionalMaterials=True)
     destination.mkdir(parents=True,exist_ok=True);name=f'bailong-desktop-pet-{version}-program'
     archive=destination/(name+'.zip');temp=archive.with_suffix('.tmp');meta=destination/(name+'.json')
     with zipfile.ZipFile(temp,'w',zipfile.ZIP_DEFLATED,compresslevel=3) as z:

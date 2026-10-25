@@ -38,6 +38,7 @@ class Release:
     program_info_url:str=''
     fallback:object=None
     reason:str=''
+    optional_materials:bool=False
     @property
     def url(self):return release_url(self.tag)
 
@@ -139,8 +140,9 @@ def prepare_release(release,current,opener,cancel,app_root):
             try:
                 info=json.loads(read_small(release.program_info_url,65536,opener,cancel))
                 if info.get('schema')!=1 or info.get('kind')!='program' or info.get('version')!=release.version or not re.fullmatch('[0-9a-f]{24}',str(info.get('materialId',''))):raise MaterialMismatch('纯程序包说明不匹配')
-                local_materials(app_root or ROOT,info['materialId'],cancel)
-                release=ensure_checksum(replace(release,material_id=info['materialId']),opener,cancel)
+                optional=info.get('optionalMaterials') is True
+                if not optional:local_materials(app_root or ROOT,info['materialId'],cancel)
+                release=ensure_checksum(replace(release,material_id=info['materialId'],optional_materials=optional),opener,cancel)
             except UpdateCancelled:raise
             except (UpdateError,OSError,ValueError,KeyError,AttributeError) as exc:
                 if not release.fallback:raise UpdateError('本机暂不能使用该纯程序包，且该版本未提供完整包') from exc

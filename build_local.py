@@ -31,7 +31,7 @@ def sha(path):
 
 def source_hashes():
     paths=list((ROOT/'app').glob('*.py'))
-    paths += [ROOT/name for name in ('build_local.py','quality_check.py','build_release.py','check_bundle.py','deploy_release.py','release_version.py','release_retention.py','asset_pack.py','build_materials.py','build_program_update.py','package_trim.py','test_local_workflow.py','test_release_version.py','test_release_retention.py') if (ROOT/name).is_file()]
+    paths += [ROOT/name for name in ('build_local.py','quality_check.py','build_release.py','build_card_only.py','check_bundle.py','deploy_release.py','release_version.py','release_retention.py','asset_pack.py','build_materials.py','build_program_update.py','package_trim.py','test_local_workflow.py','test_release_version.py','test_release_retention.py') if (ROOT/name).is_file()]
     if (ROOT/'app/material_catalog.json').is_file():paths.append(ROOT/'app/material_catalog.json')
     paths += [p for p in [ROOT/'requirements-enhanced.txt',ROOT/'app/book_catalog.json'] if p.is_file()]
     paths += [p for p in (ROOT/'app/fonts').glob('*') if p.is_file()]

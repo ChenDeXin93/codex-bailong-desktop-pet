@@ -42,6 +42,7 @@ class ActivityThread(QThread):
         self.stop=threading.Event()
         self.tail=RolloutTail(home)
         self.token_index=TokenUsageIndex(STATE_DIR/'token-usage.sqlite3',home);self.last_token_scan=0;self.token_wake=threading.Event();self.token_reader=None
+        self.week_cycle=None
         self.token_runs=RefreshRuns()
         self.last_presence_scan=0;self.presence_reader=None;self.desktop_open=None;self.last_read_scan=0;self.seed_status_sent=False;self.last_name_scan=-10;self.conversation_names={}
         from session_read_state import ReadAcknowledgements
@@ -133,6 +134,11 @@ class ActivityThread(QThread):
         if self.live_reader:self.live_reader.join(2)
     def set_context(self,displayed,visited=()):
         with self.context_lock:self.displayed=tuple(displayed);self.visited=tuple(visited)
+    def set_week_cycle(self,cycle):
+        with self.context_lock:
+            if self.week_cycle==cycle:return
+            self.week_cycle=cycle
+        self.token_wake.set()
     def read_presence(self):
         from desktop_services import codex_desktop_open
         try:value=codex_desktop_open()
@@ -144,7 +150,14 @@ class ActivityThread(QThread):
         self.event.emit({'kind':'token_busy','busy':True,'run_id':run})
         terminal=None;health=None
         try:
-            snapshot=self.token_index.poll(stop=self.stop.is_set)
+            with self.context_lock:cycle=self.week_cycle
+            options=dict(stop=self.stop.is_set)
+            if cycle:options['cycle']=cycle
+            snapshot=self.token_index.poll(**options)
+            if (snapshot.get('quota_history') or {}).get('pending'):
+                # Bound each import slice and allow the UI/status worker to run.
+                # Continue in five seconds without adding a GUI timer or scanner.
+                self.last_token_scan=min(self.last_token_scan,time.monotonic()-25)
             if not self.stop.is_set():
                 terminal={'kind':'token_usage','snapshot':snapshot,'run_id':run}
                 code=('token_schema' if snapshot.get('format_unknown') else 'token_missing') if snapshot.get('unavailable') else 'token_cached' if snapshot.get('readable_files')==0 else 'token_partial' if snapshot.get('partial') else 'ok'
@@ -281,7 +294,7 @@ class EnhancedPet(Pet):
         self.diagnostic_timer.setInterval(10000)
         self.diagnostic_timer.timeout.connect(self.record_state)
         self.diagnostic_timer.start()
-        self.tray=QSystemTrayIcon(QIcon(self.frames[0]),self)
+        self.tray=QSystemTrayIcon(QIcon(str(ROOT/'app/branding/bailong.ico')),self)
         self.tray.setToolTip('白龙桌宠增强版 · 双击角色查额度')
         tray_menu=QMenu()
         tray_menu.addAction('显示 / 隐藏气泡',self.toggle_bubble)
@@ -478,7 +491,15 @@ class EnhancedPet(Pet):
 
     def update_quota(self,windows,observed,source):
         if source=='session' and observed<self.quota_observed:return
-        self.local_reset_evidence.observe(windows,observed,source)
+        if source=='live':self._recent_live_quota=([dict(w) for w in windows],observed)
+        elif source=='session':
+            from quota_history import inherit_live_plan
+            windows=inherit_live_plan(windows,getattr(self,'_recent_live_quota',None),observed)
+        self.local_reset_evidence.observe(windows,observed,source,self.bubble.reset_snapshot)
+        if source=='live' and self.activity:
+            from week_cycle import context
+            cycle=context(windows,self.local_reset_evidence.state,observed,source)
+            self.activity.set_week_cycle(cycle)
         self.bubble.reset_snapshot=self.local_reset_evidence.decorate(self.bubble.reset_snapshot)
         self.quota_windows=windows
         self.quota_observed=observed

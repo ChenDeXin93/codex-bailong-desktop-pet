@@ -48,6 +48,8 @@ class TokenUsageIndex:
         db.execute('CREATE INDEX IF NOT EXISTS usage_stamp ON usage(stamp)')
         from token_analytics import migrate
         migrate(db)
+        from quota_history import migrate as migrate_quota_history
+        migrate_quota_history(db)
         db.execute('CREATE TABLE IF NOT EXISTS source_identity (home TEXT PRIMARY KEY)')
         self.legacy_import_pending=False
         if not db.execute('SELECT 1 FROM source_identity').fetchone():
@@ -90,7 +92,7 @@ class TokenUsageIndex:
         from token_analytics import scan_file
         return scan_file(self,db,path,stop)
 
-    def poll(self,now=None,stop=lambda:False):
+    def poll(self,now=None,stop=lambda:False,cycle=None):
         from performance_metrics import METRICS
         files=self.catalog.discover(check=True);errors=self.catalog.errors;readable=0;schema_errors=0
         with closing(self.connect()) as db, db:
@@ -109,6 +111,15 @@ class TokenUsageIndex:
             if not readable:
                 result['partial']=True
                 if not result.get('history_days'):result['unavailable']=True;result['report']={}
+            if cycle:
+                from week_cycle import summarize,usage
+                used,records=usage(db,cycle)
+                result['week_cycle']=summarize(cycle,used,records,
+                    readable>0 and not result['partial'] and not result.get('unavailable'),now)
+            from quota_history import import_step,snapshot as quota_history_snapshot
+            progress=import_step(db,files,stop)
+            result['quota_history']=quota_history_snapshot(db,cycle,now,
+                readable>0 and not result['partial'] and not result.get('unavailable'),progress)
             return result
 
     def snapshot(self,db,now=None,errors=0):

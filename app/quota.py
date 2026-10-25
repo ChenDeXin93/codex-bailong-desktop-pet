@@ -103,6 +103,8 @@ def quota_windows(data,allow_empty=False):
         name={300:'5小时',10080:'一周'}.get(minutes, f'{minutes}分钟' if minutes else '额度窗口')
         used=window.get('usedPercent')
         remaining=None if used is None else max(0,min(100,100-float(used)))
-        windows.append({'name':name,'remaining':remaining,'resetsAt':window.get('resetsAt')})
+        item={'name':name,'remaining':remaining,'resetsAt':window.get('resetsAt')}
+        if bucket.get('planType'):item['plan']=str(bucket['planType'])[:40].lower()
+        windows.append(item)
     if not windows and not allow_empty: raise RuntimeError('服务器暂未提供额度窗口。')
     return windows

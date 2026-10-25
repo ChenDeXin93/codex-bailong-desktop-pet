@@ -9,7 +9,11 @@ from desktop_core import DEFAULTS,VERSION
 from desktop_services import autostart_enabled,set_autostart,import_character,validate_character,all_items
 from settings_draft import SettingsDraft
 from connection_widgets import CapabilityPanel
-from ui_theme import MUTED,PRIMARY,BORDER
+from ui_theme import MUTED,PRIMARY,BORDER,PANEL,SURFACE,SELECTED,INK,ACCENT,editor_stylesheet
+from typography import FONT_CSS
+from settings_controls import SwitchRow,SlidingSegments
+from choice_controls import ChoiceCombo as QComboBox
+from number_controls import DecimalField as QDoubleSpinBox
 from card_motion import AnimatedDisclosure
 
 class ConnectionJob(QThread):
@@ -48,8 +52,19 @@ class SettingsDialog(QDialog):
         super().__init__(pet,Qt.WindowType.Widget if embedded else Qt.WindowType.Dialog);self.pet=pet;self.embedded=embedded;self.fields={};self.job=None;self.connection_job=None
         self.field_tabs={};self.field_titles={};self.factors={};self._writing_widgets=True;self.draft=None;self.path_job=None
         if embedded:self.setWindowFlags(Qt.WindowType.Widget)
-        self.setWindowTitle('白龙桌宠 · 设置');self.resize(590,680)
+        self.setWindowTitle('白龙桌宠设置');self.resize(590,680)
+        self.setStyleSheet(editor_stylesheet(FONT_CSS)+
+            f'QPushButton{{border:0;border-radius:7px;padding:6px 10px;}}'
+            f'QTabWidget::pane{{border:0;background:{PANEL};}}QTabBar::tab{{background:{SELECTED};color:{MUTED};border:0;border-radius:6px;padding:7px 10px;margin:2px;}}'
+            f'QTabBar::tab:selected{{background:{SURFACE};color:{INK};}}'
+            f'QScrollBar:vertical{{background:{SELECTED};width:12px;margin:0;border:0;border-radius:6px;}}'
+            f'QScrollBar::handle:vertical{{background:{ACCENT};border:2px solid {SELECTED};border-radius:6px;min-height:42px;}}'
+            f'QScrollBar::handle:vertical:hover{{background:{PRIMARY};}}QScrollBar::handle:vertical:pressed{{background:{INK};}}'
+            'QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical{height:0;width:0;border:0;background:transparent;}'
+            'QScrollBar::add-page:vertical,QScrollBar::sub-page:vertical{background:transparent;}'
+            'QScrollBar:vertical:disabled,QScrollBar::handle:vertical:disabled{background:transparent;border-color:transparent;}')
         outer=QVBoxLayout(self);self.tabs=QTabWidget();outer.addWidget(self.tabs,1)
+        outer.setContentsMargins(10,8,10,8);outer.setSpacing(6);self.tabs.setDocumentMode(True);self.tabs.tabBar().setExpanding(True)
         self._page_forms={};self._built_pages=set();self._building_index=0;self.refresh_buttons={}
         for title in ['面板与显示', '人物与动作', 'Codex 联动', '角色与素材', '闲聊与台词', '更新与维护']:self.tab(title)
         self.build_page(0)
@@ -82,15 +97,15 @@ class SettingsDialog(QDialog):
     def build_page_0(self):
         pet=self.pet
         appearance=self.tab('面板与显示')
-        self.section(appearance,'显示哪些内容','勾选与数值点击“应用”后生效；切页保留草稿。')
-        self.check(appearance,'panel_detached','面板与人物分离（人物走动时面板固定，可单独拖动面板）')
-        for key,title in [('character_visible','显示人物（关闭后仅保留独立卡片）'),('on_top','始终置顶'),('video_fullscreen_yield','视频全屏时临时取消置顶（完成提醒优先）'),('mouse_through','鼠标穿透（从托盘找回）'),('bubble','显示面板（关闭后仅保留人物）'),('quota_visible','显示额度和重置时间')]:
+        self.section(appearance,'显示内容',None)
+        self.check(appearance,'panel_detached','面板与人物分别移动')
+        for key,title in [('character_visible','显示人物'),('on_top','始终置顶'),('video_fullscreen_yield','全屏视频时让位'),('mouse_through','鼠标穿透（可从托盘恢复）'),('bubble','显示面板'),('quota_visible','显示额度和重置时间')]:
             self.check(appearance,key,title)
             if key=='video_fullscreen_yield':
                 note=QLabel('完成提醒确认后，视频仍全屏则继续让位；退出全屏恢复当前置顶设置。')
                 note.setWordWrap(True);note.setStyleSheet(f'font-size:11px;color:{MUTED};');appearance.addRow(note)
         self.section(appearance,'卡片与快捷入口','自动模式闲置后收为胶囊；手动选择胶囊或极简后不会因新状态自动展开。')
-        self.mode=QComboBox();self.mode.addItem('自动：正常卡片 / 闲置时胶囊','auto');self.mode.addItem('胶囊：状态和快捷圆','mini');self.mode.addItem('极简：仅额度百分比','minimal')
+        self.mode=SlidingSegments([('自动','auto'),('胶囊','mini'),('极简','minimal')])
         appearance.addRow('卡片显示模式',self.mode);self.fields['bubble_mode']=self.mode;self.field_tabs['bubble_mode']=0;self.field_titles['bubble_mode']='卡片显示模式'
         self.mode.currentIndexChanged.connect(lambda:self.edited('bubble_mode'))
         from quick_actions import ACTIONS
@@ -111,14 +126,14 @@ class SettingsDialog(QDialog):
         self.check(behavior,'no_move','锁定人物位置（禁止拖动和自主走动）')
         self.check(behavior,'wandering','允许自主走动（不影响手动拖动）')
         self.check(behavior,'wander_horizontal_only','自主走动仅水平')
+        self.number(behavior,'move_range','自主走动范围',.1,1,.1,factor=100,suffix='%')
         self.check(behavior,'drag_physics','松手后惯性滑行与反弹')
         self.section(behavior,'动作与声音','自动动作静音；只在你主动点击或手动播放时使用音效。')
         self.check(behavior,'random_actions','自动随机动作')
         self.check(behavior,'sound','主动点击人物或手动动作时播放音效')
         self.advanced_button=QPushButton('展开高级动作参数');self.advanced_button.setCheckable(True);behavior.addRow(self.advanced_button)
         advanced=QWidget();advanced_form=QFormLayout(advanced);advanced_form.setContentsMargins(0,0,0,0)
-        for key,title,lo,hi,step in [('playback_speed','播放速度（倍）',.25,3,.25),('action_gap','动作结束后等待（秒）',0,60,1),('random_interval','自主动作间隔（秒）',3,600,1),('move_speed','自主走动速度（像素/秒）',10,300,5)]:self.number(advanced_form,key,title,lo,hi,step)
-        self.number(advanced_form,'move_range','自主走动幅度',.1,1,.1,factor=100,suffix='%')
+        for key,title,lo,hi,step in [('playback_speed','播放速度（倍）',.25,3,.25),('action_gap','动作结束后等待（秒）',0,60,1),('random_interval','自主动作间隔（秒）',3,600,1),('move_speed','自主走动基础速度（像素/秒）',10,300,5)]:self.number(advanced_form,key,title,lo,hi,step)
         self.advanced_card=AnimatedDisclosure(advanced);behavior.addRow(self.advanced_card)
         self.advanced_button.toggled.connect(self.advanced_card.set_expanded)
         self.advanced_button.toggled.connect(lambda checked:self.advanced_button.setText('收起高级动作参数' if checked else '展开高级动作参数'))
@@ -127,10 +142,10 @@ class SettingsDialog(QDialog):
         pet=self.pet
         connection=self.tab('Codex 联动')
         self.section(connection,'启动与退出','Windows 登录启动与随 Codex 启动相互独立；按需开启。')
-        self.startup=QCheckBox('登录 Windows 时启动');connection.addRow(self.startup)
+        self.startup=SwitchRow('登录 Windows 时启动');connection.addRow(self.startup)
         self.field_tabs['startup']=self._building_index;self.field_titles['startup']='开机启动'
         self.startup.toggled.connect(lambda:self.edited('startup'))
-        self.codex_startup=QCheckBox('打开 Codex 时自动启动桌宠');connection.addRow(self.codex_startup)
+        self.codex_startup=SwitchRow('随 Codex 启动');connection.addRow(self.codex_startup)
         self.field_tabs['codex_startup']=self._building_index;self.field_titles['codex_startup']='随 Codex 启动'
         self.codex_startup.toggled.connect(lambda:self.edited('codex_startup'))
         note=QLabel('登录时运行轻量监听；识别 Codex 桌面端，不依赖 Codex++。手动退出桌宠后，本次 Codex 使用期间不再拉起。可另行开启关闭联动。');note.setWordWrap(True);note.setStyleSheet(f'font-size:11px;color:{MUTED};');connection.addRow(note)
@@ -210,7 +225,7 @@ class SettingsDialog(QDialog):
         maintenance.addRow(QLabel('当前版本 '+VERSION))
 
     def section(self,form,title,note):
-        name=QLabel(title);name.setStyleSheet(f'font-size:13px;font-weight:500;color:{PRIMARY};background:#eae3f0;border-radius:6px;padding:6px;margin-top:6px;');form.addRow(name)
+        name=QLabel(title);name.setStyleSheet(f'font-size:13px;font-weight:500;color:{PRIMARY};background:transparent;padding:2px;margin-top:10px;');form.addRow(name)
         if note:
             label=QLabel(note);label.setWordWrap(True);label.setStyleSheet(f'font-size:11px;color:{MUTED};margin-bottom:3px;');form.addRow(label)
     def choose_path(self,key):
@@ -237,13 +252,16 @@ class SettingsDialog(QDialog):
         button,title=self.refresh_buttons[key];button.setEnabled(not busy);button.setText('查询中…' if busy else title)
     def tab(self,title):
         if title in self._page_forms:return self._page_forms[title]
-        widget=QWidget();form=QFormLayout(widget);form.setVerticalSpacing(9);form.setHorizontalSpacing(12)
+        widget=QWidget();form=QFormLayout(widget);form.setVerticalSpacing(5);form.setHorizontalSpacing(12);form.setContentsMargins(9,3,9,10)
         if self.embedded:
             widget.setObjectName('settings_category');widget.setStyleSheet('QWidget#settings_category{background:#f5f2f7;}')
             form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
             area=QScrollArea();area.setWidgetResizable(True)
+            area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
             # Reserve the gutter so opening a disclosure cannot rewrap its body.
             area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn);area.setWidget(widget)
+            bar=area.verticalScrollBar();bar.setSingleStep(32)
+            bar.rangeChanged.connect(lambda low,high,b=bar:b.setEnabled(high>low))
             index=self.tabs.addTab(area,{'面板与显示':'面板','人物与动作':'人物','Codex 联动':'Codex','角色与素材':'素材','闲聊与台词':'闲聊','更新与维护':'维护'}.get(title,title))
             self.tabs.setTabToolTip(index,title)
         else:self.tabs.addTab(widget,title)
@@ -256,7 +274,7 @@ class SettingsDialog(QDialog):
         if self.embedded and event.key()==Qt.Key.Key_Escape:self.dismiss();event.accept();return
         super().keyPressEvent(event)
     def check(self,form,key,title):
-        widget=QCheckBox(title);self.fields[key]=widget;form.addRow(widget);self.field_tabs[key]=self._building_index;self.field_titles[key]=title
+        widget=SwitchRow(title);self.fields[key]=widget;form.addRow(widget);self.field_tabs[key]=self._building_index;self.field_titles[key]=title
         widget.toggled.connect(lambda:self.edited(key))
     def number(self,form,key,title,lo,hi,step,factor=1,suffix=''):
         widget=QDoubleSpinBox();widget.setRange(lo*factor,hi*factor);widget.setSingleStep(step*factor);widget.setDecimals(0 if step*factor>=1 else 2);widget.setSuffix(suffix)
@@ -266,7 +284,7 @@ class SettingsDialog(QDialog):
         self._writing_widgets=True
         for key,widget in self.fields.items():
             if isinstance(widget,QCheckBox):widget.setChecked(settings.get(key,DEFAULTS[key]))
-            elif isinstance(widget,QComboBox):widget.setCurrentIndex(widget.findData(settings.get(key,DEFAULTS[key])))
+            elif isinstance(widget,(QComboBox,SlidingSegments)):widget.setCurrentIndex(widget.findData(settings.get(key,DEFAULTS[key])))
             elif isinstance(widget,QLineEdit):widget.setText(settings.get(key,DEFAULTS[key]))
             else:widget.setValue(settings.get(key,DEFAULTS[key])*self.factors.get(key,1))
         if hasattr(self,'lines'):
@@ -296,7 +314,7 @@ class SettingsDialog(QDialog):
         elif key=='codex_startup':value=self.codex_startup.isChecked()
         elif key=='talk_lines':value=[line.strip() for line in self.lines.toPlainText().splitlines() if line.strip()]
         else:
-            widget=self.fields[key];value=widget.isChecked() if isinstance(widget,QCheckBox) else widget.currentData() if isinstance(widget,QComboBox) else widget.text() if isinstance(widget,QLineEdit) else widget.value()/self.factors.get(key,1)
+            widget=self.fields[key];value=widget.isChecked() if isinstance(widget,QCheckBox) else widget.currentData() if isinstance(widget,(QComboBox,SlidingSegments)) else widget.text() if isinstance(widget,QLineEdit) else widget.value()/self.factors.get(key,1)
         self.draft.set(key,value);self.status.clear();self.update_draft_state()
     def update_draft_state(self,*args):
         if self.draft is None:return

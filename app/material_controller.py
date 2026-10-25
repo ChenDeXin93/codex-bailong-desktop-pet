@@ -22,24 +22,30 @@ class MaterialJob(QThread):
         except Exception:self.failed.emit('素材准备失败，继续使用原画质')
 
 class MaterialController(QObject):
-    changed=Signal(object);ready=Signal(str,object);idle=Signal()
+    changed=Signal(object);ready=Signal(str,object);idle=Signal();removeRequested=Signal()
     def __init__(self,store,parent=None):
         super().__init__(parent);self.store=store;self.job=None;self.closing=False
         self.state=dict(phase='idle',message='',downloaded=0,total=0)
     def snapshot(self):
-        return dict(self.state,current=self.store.current,hdCached=self.store.known_available('hd'),supported=bool(self.store.catalog),busy=self.job is not None)
+        return dict(self.state,current=self.store.current,lightCached=self.store.known_available('light'),hdCached=self.store.known_available('hd'),supported=bool(self.store.catalog),busy=self.job is not None)
     def publish(self,**changes):self.state.update(changes);self.changed.emit(self.snapshot())
     def request(self,tier):
         if self.closing or self.job or self.state['phase']=='pending' or tier not in ('light','hd'):return False
-        if tier==self.store.current:self.publish(message='当前已使用所选画质');return False
+        if tier==self.store.current and self.store.known_available(tier):self.publish(message='当前已使用所选画质');return False
         self.publish(phase='verifying' if self.store.known_available(tier) else 'downloading',message='正在准备素材…',downloaded=0,total=0)
         job=self.job=MaterialJob(self.store,tier,self);job.result.connect(self._result);job.failed.connect(lambda text:self.publish(phase='error',message=text));job.progress.connect(self._progress);job.finished.connect(self._finished);self.changed.emit(self.snapshot());job.start();return True
     def _progress(self,n,total,phase):
-        if not self.closing:self.publish(phase=phase,downloaded=n,total=total,message='正在下载高清素材…' if phase=='downloading' else '正在校验素材…')
+        if not self.closing:self.publish(phase=phase,downloaded=n,total=total,message='正在下载动画资源…' if phase=='downloading' else '正在校验素材…')
     def _result(self,tier,root):
         if self.closing or self.job.cancel.is_set():return
         self.publish(phase='pending',message='素材已就绪，等待当前动作自然结束后切换…');self.ready.emit(tier,root)
     def applied(self):self.publish(phase='idle',message='画质已切换，原动画与 Codex 联动继续保留')
+    def remove(self,plan):
+        if self.job:return False
+        job=self.job=RemovalJob(self.store,plan,self)
+        job.done.connect(lambda:self.publish(phase='idle',message='动画资源已移除，仅保留卡片'))
+        job.failed.connect(self.failed);job.finished.connect(self._finished)
+        self.publish(phase='removing',message='正在移除动画资源…');job.start();return True
     def failed(self,text):self.publish(phase='error',message=str(text)[:220])
     def _finished(self):
         job=self.job;self.job=None
@@ -54,25 +60,39 @@ class MaterialController(QObject):
         if self.job:self.job.cancel.set();return False
         return True
 
+class RemovalJob(QThread):
+    done=Signal();failed=Signal(str)
+    def __init__(self,store,plan,parent=None):
+        super().__init__(parent);self.store=store;self.plan=plan;self.cancel=threading.Event()
+    def run(self):
+        from material_removal import remove_animations
+        try:remove_animations(self.store,self.plan);self.done.emit()
+        except (OSError,ValueError) as exc:self.failed.emit('移除未完成，卡片继续可用：'+str(exc)[:150])
+
 class MaterialPanel(QWidget):
     def __init__(self,controller,parent=None):
         super().__init__(parent);self.controller=controller
         layout=QVBoxLayout(self);layout.setContentsMargins(0,0,0,0)
         self.summary=QLabel();self.summary.setWordWrap(True);layout.addWidget(self.summary)
-        row=QHBoxLayout();self.choice=QComboBox();self.choice.addItem('轻量 · 512px（默认）','light');self.choice.addItem('高清 · 720px','hd');row.addWidget(self.choice,1)
+        from settings_controls import SlidingSegments
+        row=QHBoxLayout();self.choice=SlidingSegments([('轻量 512px','light'),('高清 720px','hd')]);row.addWidget(self.choice,1)
         self.action=QPushButton();row.addWidget(self.action);self.cancel_button=QPushButton('取消');row.addWidget(self.cancel_button);layout.addLayout(row)
         self.progress=QProgressBar();self.progress.setRange(0,1000);layout.addWidget(self.progress)
         self.message=QLabel();self.message.setWordWrap(True);layout.addWidget(self.message)
-        note=QLabel('仅用于内置白龙。高清按需下载并缓存，后续升级可复用；切换不改变人物大小。取消下载不会更改当前画质。');note.setWordWrap(True);note.setStyleSheet('font-size:11px;font-weight:500;color:#706879;');layout.addWidget(note)
+        self.remove_button=QPushButton('移除动画资源，仅保留卡片');self.remove_button.setProperty('role','danger');layout.addWidget(self.remove_button)
+        self.remove_button.clicked.connect(controller.removeRequested.emit)
+        note=QLabel('动画按需下载，升级可复用；移除后可重新下载。');note.setWordWrap(True);note.setStyleSheet('font-size:11px;font-weight:500;color:#706879;');layout.addWidget(note)
         self.choice.setCurrentIndex(max(0,self.choice.findData(controller.store.current)))
         self.choice.currentIndexChanged.connect(lambda:self.refresh(controller.snapshot()));self.action.clicked.connect(lambda:controller.request(self.choice.currentData()));self.cancel_button.clicked.connect(controller.cancel)
         controller.changed.connect(self.refresh);self.refresh(controller.snapshot())
     def refresh(self,s):
-        self.summary.setText('当前：'+('高清 · 720px' if s['current']=='hd' else '轻量 · 512px')+('　｜高清已缓存' if s['hdCached'] else '　｜高清未下载'))
+        self.summary.setText('当前：'+({'hd':'高清 720px','light':'轻量 512px'}.get(s['current'],'仅卡片')))
         tier=self.choice.currentData();busy=s['busy'] or s['phase']=='pending'
         self.choice.setEnabled(not busy);self.action.setEnabled(s['supported'] and not busy and tier!=s['current'])
-        self.action.setText('下载并切换高清' if tier=='hd' and not s['hdCached'] else '切换画质')
-        self.cancel_button.setVisible(s['busy'] and s['phase']!='pending');self.cancel_button.setEnabled(s['busy']);self.message.setText(s['message'])
+        cached=s.get('hdCached' if tier=='hd' else 'lightCached',False)
+        self.action.setText('下载并启用' if not cached else '启用动画' if s['current'] is None else '切换画质')
+        self.remove_button.setEnabled(s['supported'] and not busy)
+        self.cancel_button.setVisible(s['busy'] and s['phase'] not in ('pending','removing'));self.cancel_button.setEnabled(s['busy']);self.message.setText(s['message'])
         self.progress.setVisible(s['busy'])
         total=s['total'];self.progress.setRange(0,1000 if total else 0)
         if total:self.progress.setValue(min(1000,round(s['downloaded']*1000/total)));self.progress.setFormat(f"{s['downloaded']/1048576:.1f} / {total/1048576:.1f} MB")

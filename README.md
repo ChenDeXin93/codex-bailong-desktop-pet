@@ -2,20 +2,19 @@
 
 ![文章海报](docs/media/cover.png)
 
-一只陪你使用 Codex 的 Windows 白龙桌宠：在桌面查看任务状态、接收完成提醒、追踪账户额度和 Token 用量。基于 [jingh12312-rgb/bailong-desktop-pet](https://github.com/jingh12312-rgb/bailong-desktop-pet) 持续改造，当前版本 **v0.9.9 / UI87**。
+一只陪你使用 Codex 的 Windows 白龙桌宠：在桌面查看任务状态、接收完成提醒、追踪账户额度和 Token 用量。基于 [jingh12312-rgb/bailong-desktop-pet](https://github.com/jingh12312-rgb/bailong-desktop-pet) 持续改造，当前公开版本 **v1.0.0**。
 
 **[下载安装包](https://github.com/Wunsch2048/codex-bailong-desktop-pet/releases/latest)** · [快速部署](docs/快速部署说明.txt) · [全部新增功能](docs/新增功能说明.txt) · [开发说明](docs/DEVELOPMENT.md) · [迭代历史](docs/迭代历史.txt)
 
-### v0.9.9 更新
+### v1.0.0 更新
 
-- 修复任务结束后迟到的同回合日志把状态重新改为“进行中”，或把中断、失败误改为完成的问题（[#3](https://github.com/Wunsch2048/codex-bailong-desktop-pet/issues/3)）。
-- 旧 Token 数据库暂时不可读时保留迁移待重试状态，下一次刷新继续尝试，避免历史统计静默缺失（[#4](https://github.com/Wunsch2048/codex-bailong-desktop-pet/issues/4)）。
-- 编辑消息形成的日志分支归回原对话，清理无法跳转的重复条目与没有回合编号的旧提醒。
-- 极简模式可临时展开正常卡片并返回；胶囊与极简额度圆保持原有配色、背景和字体，只加入进场填充。自主走动围绕手动放置点，默认仅水平移动。
-- 状态水球改为穿插与快转交替，待机缓慢旋转；减少静置图标卡顿，修复持续工作动作里笔记本反复开合。
+- 加入历史额度周期对比，显示周期已用 Token 与按剩余额度推测的总量，并区分套餐切换和数据不足。
+- 桌宠自主移动衔接落地动画，水平范围可到屏幕两侧，减少在中间停留。
+- 优化设置控件、数据面板导航与窗口过渡，改善按钮描边和展开闪烁。
+- 支持仅安装卡片；动画可单独下载、启用或移除。
+- 提供完整 Windows 安装包、应用内程序更新包、仅卡片安装包和独立轻量动画资源。
 
-完整变化、安装方式及已知反馈见 [v0.9.9 更新说明](docs/releases/v0.9.9.md)。目前仅提供 Windows x64 包；[macOS 移植提议](https://github.com/Wunsch2048/codex-bailong-desktop-pet/issues/5)与[ Linux 支持请求](https://github.com/Wunsch2048/codex-bailong-desktop-pet/issues/2)尚未合入。
-
+完整变化与安装方式见 [v1.0.0 更新说明](docs/releases/v1.0.0.md)。目前提供 Windows x64 版本；[macOS 移植提议](https://github.com/Wunsch2048/codex-bailong-desktop-pet/issues/5)与[ Linux 支持请求](https://github.com/Wunsch2048/codex-bailong-desktop-pet/issues/2)尚未合入。
 ### v0.9.3 更新（水球状态图标与浅色主题）
 
 进行中图标由三颗水球绕中心旋转、交错换位并轮流短暂黏连；完成、等待、中断与待命等状态各有清晰图形。浅色卡片和深色胶囊使用各自适配的颜色，图标在状态切换时平滑变形。动图来自实装控件连续帧：
@@ -32,6 +31,7 @@
 | 不容易错过的完成提醒 | 完成后感叹号轻晃，再静止保留；点击确认或在 Codex 实际查看回复后消除；子会话不会重复冒充主会话提醒 |
 | 会话跳转 | 点击气泡里的会话名，直接进入对应 Codex 对话 |
 | 胶囊与卡片 | 闲置自动缩小，也可保持小胶囊；点击展开正常卡片，详情、聊天和设置集成在面板内 |
+| 仅卡片安装 | 可不下载人物动画；之后可单独下载轻量或高清素材，也可移除动画保留卡片 |
 | 额度与重置 | 真实账户提供的 5 小时和周剩余额度、重置倒计时；胶囊显示一个开口弧额度圆 |
 | Token 统计 | 全部、30 天、7 天柱状图；点击今日 Token 查看 24 小时曲线 |
 | 独立日报 | 累计与昨日指标分组、昨日小时曲线、按模型筛选；27 本书的等量比较使用累计 Token 与真实文本计数估算 |

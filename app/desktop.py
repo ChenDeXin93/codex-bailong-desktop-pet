@@ -44,7 +44,9 @@ class DesktopPet(EnhancedPet):
         self.connection_health=CapabilityHealth(data_home(),previous)
         from material_store import MaterialStore
         self.material_store=MaterialStore(ROOT,STATE_DIR);self._pending_material=None
+        self._materials_missing=self.material_store.current is None
         self.player=None;self.gate=ActionGate();self.asset_root=self.material_store.root
+        self._landing_seed=None;self._landing_preparing=None
         self.animation_wakeups=0;self.movement_wakeups=0
         self.sustained=SustainedPlayback();self.continuous=ContinuousWork();self._resume_idle=False
         self._interactive_action=False;self._manual_action=False;self._priority=0
@@ -71,6 +73,7 @@ class DesktopPet(EnhancedPet):
         from material_controller import MaterialController
         self.materials=MaterialController(self.material_store,self)
         self.materials.ready.connect(self.queue_material)
+        self.materials.removeRequested.connect(self.remove_materials)
         self._material_exit_pending=False
         self.reactions.set_actions(item['id'] for item in all_items(self.manifest))
         self.bubble.reportRequested.connect(self.open_report)
@@ -84,6 +87,7 @@ class DesktopPet(EnhancedPet):
         if self.settings.get('schema')!=2 and CONFIG.exists():
             shutil.copy2(CONFIG,STATE_DIR/'settings-before-0.5.0.json')
         self.settings=normalized(self.settings)
+        if self._materials_missing:self.settings.update(character_visible=False,bubble=True)
         self._visibility_ready=True
         self._card_anchor=self.settings.get('card_anchor')
         self.walk_direction=self.settings['facing']
@@ -135,13 +139,19 @@ class DesktopPet(EnhancedPet):
         return checked(self.asset_root,name)
 
     def play(self,item,mode):
+        if self._materials_missing:return False
         if self._visibility_ready and (self._desktop_hidden or not self.settings.get('character_visible',True)):return False
         if self._interactive_action and mode=='variant':mode='click'
         if not self.gate.request(mode,item,force=self._interactive_action or self._manual_action):return False
         self.sustained.cancel()
         if self.player is None:self.player=StreamPlayer()
         try:
-            frame=self.player.start(self.asset_path(item),self.frame_size,item.get('durationMs',4000)/1000,cache_loop=mode=='idle')
+            path=self.asset_path(item)
+            seed=None
+            if mode=='landing' and self._landing_seed:
+                key=(str(path),self.frame_size,path.stat().st_mtime_ns)
+                if self._landing_seed[0]==key:seed=self._landing_seed[1]
+            frame=self.player.start(path,self.frame_size,item.get('durationMs',4000)/1000,cache_loop=mode=='idle',seed=seed)
         except (OSError,ValueError,KeyError) as error:
             self.decode_error=type(error).__name__;self.gate.state='idle'
             if self.current and self.current is not item:
@@ -156,6 +166,10 @@ class DesktopPet(EnhancedPet):
 
     def idle(self):
         self.gate.state='idle'
+        if self._materials_missing:
+            from PySide6.QtGui import QPixmap
+            image=QPixmap(1,1);image.fill(Qt.GlobalColor.transparent);self.frames=[image];self.current=self.manifest['idle']
+            return
         self.play(random.choice(self.idles),'idle')
 
     @measured('pet_animation_event')
@@ -336,9 +350,40 @@ class DesktopPet(EnhancedPet):
             self.message_priority=priority
         super().say(text,ms)
 
-    def stop_walk(self):
+    def stop_walk(self,land=False):
         self.walking=False;self.walk_target=None
-        if self.mode=='walk':self.gate.state='idle';self.idle()
+        if self.mode=='walk':
+            self.gate.state='idle'
+            landing=self.manifest.get('landingAnimation') if land else None
+            if not landing or not self.play(landing,'landing'):self.idle()
+
+    def prepare_landing(self):
+        landing=self.manifest.get('landingAnimation')
+        if not landing:return
+        try:
+            path=self.asset_path(landing)
+            key=(str(path),self.frame_size,path.stat().st_mtime_ns)
+        except (OSError,ValueError,KeyError):return
+        if self._landing_preparing==key or (self._landing_seed and self._landing_seed[0]==key):return
+        self._landing_preparing=key
+        def decode():
+            from PIL import Image
+            import zlib
+            from decode_runtime import STATS,opened
+            try:
+                opened(path)
+                with Image.open(path) as source:
+                    source.seek(0);source.load()
+                    raw=source.convert('RGBA').resize((key[1],key[1]),Image.Resampling.LANCZOS).tobytes()
+                    delay=max(.015,float(source.info.get('duration',landing.get('durationMs',2333)/max(1,source.n_frames)))/1000)
+                STATS.add('decoded_frames')
+                seed=(zlib.compress(raw,1),delay)
+                if self._landing_preparing==key:self._landing_seed=(key,seed)
+            except (OSError,ValueError,KeyError):pass
+            finally:
+                if self._landing_preparing==key:self._landing_preparing=None
+        from decode_runtime import STATS
+        STATS.start(decode,'pet-landing-prefetch')
 
     def remember_wander_home(self):
         screen=QApplication.screenAt(self.frameGeometry().center()) or QApplication.primaryScreen()
@@ -356,15 +401,20 @@ class DesktopPet(EnhancedPet):
         horizontal=self.settings['wander_horizontal_only']
         corridor=local_roam_bounds(anchor,(self.width(),self.height()),
             (area.x(),area.y(),area.width(),area.height()),self.settings['move_range'],horizontal)
-        target=local_roam_target((self.x(),self.y()),corridor,self.settings['move_speed'],horizontal,random.uniform)
+        target=local_roam_target((self.x(),self.y()),corridor,self.settings['move_speed'],horizontal,
+            random.uniform,self.settings['move_range'])
         if target is None:return
         tx,ty=target
+        distance=math.hypot(tx-self.x(),ty-self.y())
+        base_speed=self.settings['move_speed']
+        self.walk_speed=min(300,max(base_speed,min(base_speed*2.5,distance/12))) if horizontal else base_speed
         self.walk_direction=1 if tx>=self.x() else -1;self.settings['facing']=self.walk_direction
         self._fx,self._fy=float(self.x()),float(self.y());self.walk_target=(tx,ty,(area.left(),area.top(),area.right()-self.width()+1,area.bottom()-self.height()+1))
         pool=self.manifest.get('moveAnimations') or [self.manifest.get('dragAnimation') or self.idles[0]]
         self.walking=True;self.gate.state='idle'
         if not self.play(random.choice(pool),'walk'):self.stop_walk();return
-        self.gesture_until=time.monotonic()+15
+        self.prepare_landing()
+        self.gesture_until=time.monotonic()+max(15,distance/max(10,self.walk_speed)+3)
 
     def motion_tick(self):
         self.movement_wakeups+=1
@@ -384,10 +434,14 @@ class DesktopPet(EnhancedPet):
             return
         if self.walking and self.walk_target and not self.dragging:
             tx,ty,bounds=self.walk_target
-            self._fx,self._fy,done=motion_step(self._fx,self._fy,tx,ty,self.settings['move_speed'],dt,bounds)
+            self._fx,self._fy,done=motion_step(self._fx,self._fy,tx,ty,self.walk_speed,dt,bounds)
             self.move(round(self._fx),round(self._fy));self.position_bubble()
-            if done or now>self.gesture_until:
-                self.stop_walk();self.buffer_until=now+self.settings['action_gap'];self.next_chain=now+self.settings['random_interval'];self.save_settings()
+            # A delayed timer must not park a cross-screen walk in the middle.
+            # The target is always in an edge band for horizontal roaming.
+            timed_out=now>self.gesture_until and (
+                not self.settings['wander_horizontal_only'] or abs(tx-self._fx)<140)
+            if done or timed_out:
+                self.stop_walk(land=True);self.buffer_until=now+self.settings['action_gap'];self.next_chain=now+self.settings['random_interval'];self.save_settings()
         # Automatic gestures are dispatched in animate(), only after the
         # current clip has ended. This timer only moves the desktop window.
         if now>=self.next_talk:
@@ -512,6 +566,7 @@ class DesktopPet(EnhancedPet):
             self._codex_exit_gate.reset()
         old_size=self.height();foot=self.geometry().bottom()+1;center=self.geometry().center().x()
         self.settings.update(values);self.settings=normalized(self.settings)
+        if self._materials_missing:self.settings.update(character_visible=False,bubble=True)
         if 'card_anchor' in values:self._card_anchor=copy.deepcopy(self.settings.get('card_anchor'))
         if (self.settings['no_move'] or self.settings['mouse_through'] or
             self.settings['scale']!=previous.get('scale') or self.settings['on_top']!=previous.get('on_top')):
@@ -839,7 +894,9 @@ class DesktopPet(EnhancedPet):
     def switch_character(self,key):
         if not key:return
         if self._pending_material:raise ValueError('画质切换正在等待动作结束，请稍后切换角色')
-        if key=='builtin':root=self.material_store.root
+        if key=='builtin':
+            if self.material_store.current is None:raise ValueError('请先在素材设置中下载并启用动画')
+            root=self.material_store.root
         else:
             root=(self.character_dir/key).resolve()
             if root.parent!=self.character_dir.resolve():raise ValueError('角色目录无效')
@@ -850,16 +907,19 @@ class DesktopPet(EnhancedPet):
             path=(root/(item.get('playbackFile') or item['file'])).resolve()
             if not path.is_relative_to(root.resolve()) or not path.is_file():raise ValueError('角色包缺少素材或路径无效')
         old=(self.asset_root,self.manifest,self.idles,self.variants,self.settings.get('character','builtin'))
+        old_missing=self._materials_missing
         preference_keys=('scale','playback_speed','talk_lines')
         self.settings['character_preferences'][old[4]]={k:copy.deepcopy(self.settings[k]) for k in preference_keys}
         self.stop_walk();self.throwing=False;self.gate.state='idle'
         self.sustained.cancel();self.continuous.clear()
         try:
             self.asset_root=root;self.manifest=m;self.idles=[m['idle']]+m.get('additionalIdleAnimations',[]);self.variants=m.get('variants',[])
+            self._materials_missing=False
             self.reactions.set_actions(item['id'] for item in all_items(m))
             self.idle()
         except Exception:
             self.asset_root,self.manifest,self.idles,self.variants,_=old
+            self._materials_missing=old_missing
             self.reactions.set_actions(item['id'] for item in all_items(self.manifest))
             self.gate.state='idle';self.idle();raise
         self.settings['character']=key
@@ -890,10 +950,27 @@ class DesktopPet(EnhancedPet):
             self.asset_root=root;self.manifest=m;self.idles=[m['idle']]+m.get('additionalIdleAnimations',[]);self.variants=m.get('variants',[])
             self.current=m['idle'];self.gate.state='idle'
             self.reactions.set_actions(item['id'] for item in all_items(m))
+            missing=self._materials_missing;self._materials_missing=False
+            if missing:
+                self.apply_settings(dict(character_visible=True,bubble=True));self.idle()
             self.materials.applied();return True
         except (OSError,ValueError,KeyError) as error:
             self.asset_root,self.manifest,self.idles,self.variants=old
             self.materials.failed('画质切换失败：'+str(error));return False
+    def remove_materials(self):
+        from material_removal import removal_plan
+        if self.materials.job or self._pending_material:return
+        try:plan=removal_plan(self.material_store)
+        except (OSError,ValueError) as exc:self.materials.failed(str(exc));return
+        size=sum(item['bytes'] for item in plan)/1048576
+        text=f'移除当前程序及素材缓存中的 {len(plan)} 个动画文件（约 {size:.0f} MB），仅保留卡片。\n之后可在这里重新下载。自定义角色不删除。\n旧回退版本保留，可能仍占用部分共享空间。'
+        if QMessageBox.question(self.settings_dialog,'移除动画资源',text)!=QMessageBox.StandardButton.Yes:return
+        # Stop all readers before the worker unlinks any verified managed file.
+        self.apply_settings(dict(character_visible=False,bubble=True));self.stop_walk();self.sustained.cancel()
+        if self.player:self.player.close();self.player=None
+        self.cache.clear();self.pinned_frames.clear();self._materials_missing=True
+        self.settings['character']='builtin';self.save_settings();self.idle()
+        self.materials.remove(plan)
     def export_diagnostics(self):
         self.record_state();path=ROOT/('白龙诊断-'+time.strftime('%Y%m%d-%H%M%S')+'.json')
         value=json.loads((STATE_DIR/'runtime.json').read_text(encoding='utf-8'))
@@ -948,8 +1025,8 @@ class DesktopPet(EnhancedPet):
             decode_runtime=STATS.snapshot(),animation_wakeups=self.animation_wakeups,movement_wakeups=self.movement_wakeups,decode_error=self.decode_error)
         value.update(material_tiers=True,material_default='light',material_current=self.material_store.current,
             program_only_updates=True,program_update_material_verification=True,program_update_full_fallback=True,
-            material_resolution=720 if self.material_store.current=='hd' else 512,material_hd_cached=self.material_store.known_available('hd'),
-            material_content_id=self.material_store.catalog['tiers'][self.material_store.current]['id'] if self.material_store.catalog else None,
+            material_resolution=(720 if self.material_store.current=='hd' else 512) if self.material_store.current else None,material_hd_cached=self.material_store.known_available('hd'),
+            material_content_id=self.material_store.catalog['tiers'][self.material_store.current]['id'] if self.material_store.catalog and self.material_store.current else None,
             material_switch_pending=bool(self._pending_material))
         value.update(native_client_hit_testing=True,shared_paint_hit_transform=True,lost_mouse_grab_recovery=True,character_switch_keeps_navigation=True,
             independent_card_surface=True,character_visible=self.settings['character_visible'],minimal_quota_mode=True,hidden_character_decoder_paused=not self.settings['character_visible'] and not self.tick.isActive(),

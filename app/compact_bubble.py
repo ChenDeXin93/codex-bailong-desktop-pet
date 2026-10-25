@@ -71,7 +71,7 @@ def action_button(kind,tip,text='',parent=None,hit_size=20,keyboard=False,under=
     button.setIconSize(QSize(18,18) if kind=='refresh' else QSize(16,16))
     button.setFocusPolicy(Qt.FocusPolicy.StrongFocus if keyboard else Qt.FocusPolicy.NoFocus);button.setCursor(Qt.CursorShape.PointingHandCursor)
     button.setToolTip(tip);button.setAccessibleName(tip)
-    button.setStyleSheet('QToolButton{'+FONT_CSS+f'border:2px solid transparent;border-radius:6px;color:{PRIMARY};background:transparent;font-size:11px;padding:0;}}QToolButton:hover{{background:#f0eaf5;}}QToolButton:pressed{{background:#e0d3eb;}}QToolButton:checked{{background:{SELECTED};border-bottom-color:{PRIMARY};}}QToolButton:disabled{{color:{DISABLED};}}QToolButton:focus{{border-color:{ACCENT};}}')
+    button.setStyleSheet('QToolButton{'+FONT_CSS+f'border:0;border-radius:6px;color:{PRIMARY};background:transparent;font-size:11px;padding:0;}}QToolButton:hover{{background:#f0eaf5;}}QToolButton:pressed{{background:#e0d3eb;}}QToolButton:checked{{background:{SELECTED};}}QToolButton:disabled{{color:{DISABLED};}}QToolButton:focus{{border:0;background:{SELECTED};}}')
     if text:
         button.setText(text);button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon if under else Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         if under:button.setFixedSize(hit_size,36)
@@ -484,17 +484,18 @@ class CompactBubble(Bubble):
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents,through)
         if self.windowHandle():self.windowHandle().setFlag(Qt.WindowType.WindowTransparentForInput,through)
     def navigation(self):
+        from settings_controls import SlidingSegments
         toolbar=QWidget();toolbar.setObjectName('detail_shortcuts');toolbar.setFixedHeight(32)
-        toolbar.setStyleSheet('QWidget#detail_shortcuts{background:#f2edf7;border-radius:7px;}')
-        actions=QHBoxLayout(toolbar);actions.setContentsMargins(3,1,3,1);actions.setSpacing(3)
-        for kind,text,tip,slot in [('details','状态','返回进入前的状态视图',self.return_to_status),('chat','聊天','和白龙聊天',lambda:self.chatRequested.emit()),('settings','设置','桌宠设置',lambda:self.settingsRequested.emit())]:
-            shortcut=action_button(kind,tip,text,keyboard=self.panel_page!='status');shortcut.setCheckable(True)
-            shortcut.setChecked(self.panel_page==({'details':'status'}.get(kind,kind)))
-            shortcut.clicked.connect(lambda checked=False,s=slot:s());actions.addWidget(shortcut,1)
-        divider=QWidget();divider.setFixedSize(1,16);divider.setStyleSheet('background:#d9cede;');actions.addWidget(divider)
+        actions=QHBoxLayout(toolbar);actions.setContentsMargins(0,0,0,0);actions.setSpacing(7)
+        tabs=SlidingSegments([('状态','status'),('聊天','chat'),('设置','settings')],compact=True)
+        tabs.setObjectName('main_navigation');tabs.setCurrentIndex(tabs.findData(self.panel_page),False)
+        for key,b in tabs.buttons.items():b.setObjectName('bubble_'+('details' if key=='status' else key))
+        tabs.currentIndexChanged.connect(lambda index:self.return_to_status() if tabs.currentData()=='status' else
+            self.chatRequested.emit() if tabs.currentData()=='chat' else self.settingsRequested.emit())
+        actions.addWidget(tabs,1);self._navigation_segments=tabs
         for kind,text,tip,key,value in [('pin','置顶','切换始终置顶','on_top',self.pinned),('move','移动','切换桌面自由移动','wandering',self.wandering)]:
             shortcut=action_button(kind,tip,text,keyboard=self.panel_page!='status');shortcut.setCheckable(True);shortcut.setChecked(value)
-            shortcut.toggled.connect(lambda checked,k=key:self.optionRequested.emit(k,checked));actions.addWidget(shortcut,1)
+            shortcut.toggled.connect(lambda checked,k=key:self.optionRequested.emit(k,checked));actions.addWidget(shortcut)
             if key=='wandering' and self.movement_locked:shortcut.setEnabled(False);shortcut.setText('已锁定');shortcut.setToolTip('移动已锁定，请在设置中解除锁定')
         return toolbar
     def _redraw_editor(self):
@@ -511,7 +512,10 @@ class CompactBubble(Bubble):
             codex=action_button('external','打开 Codex','Codex',keyboard=True);codex.setObjectName('open_codex');codex.clicked.connect(lambda:self.codexRequested.emit());row.addWidget(codex)
             close=action_button('collapse','收起到正常气泡','收起',keyboard=True);close.clicked.connect(self.collapse_to_normal);row.addWidget(close)
             self.add(header);self.add(self.navigation());self.add(self.editor_stack)
-        self.editor_title.setText('白龙 · '+('聊天' if self.panel_page=='chat' else '设置'))
+        self.editor_title.setText('白龙 '+('聊天' if self.panel_page=='chat' else '设置'))
+        tabs=getattr(self,'_navigation_segments',None)
+        if tabs:
+            blocked=tabs.blockSignals(True);tabs.setCurrentIndex(tabs.findData(self.panel_page));tabs.blockSignals(blocked)
         for button in self.findChildren(QToolButton):
             if button.objectName() in ('bubble_chat','bubble_settings'):
                 button.setChecked(button.objectName()=='bubble_'+self.panel_page)
@@ -679,7 +683,7 @@ class CompactBubble(Bubble):
         badge.setAlignment(Qt.AlignmentFlag.AlignCenter);name_row.addWidget(badge);self._status_badge=badge
         row.addWidget(name_group);row.addStretch(1)
         self.quota_refresh_button=self.refresh_button;row.addWidget(self.refresh_button);self.refresh_button.show()
-        report_button=action_button('report','打开 / 收起 Token 日报',hit_size=28);report_button.setObjectName('bubble_report')
+        report_button=action_button('report','打开 / 收起数据面板',hit_size=28);report_button.setObjectName('bubble_report')
         report_button.clicked.connect(self.reportRequested.emit);row.addWidget(report_button)
         compact_target='minimal' if self.bubble_mode=='minimal' else 'mini'
         mini=action_button('compact','收起到极简模式' if compact_target=='minimal' else '收起到胶囊模式',hit_size=28)
@@ -700,10 +704,13 @@ class CompactBubble(Bubble):
             pending=pending_reset(self.reset_snapshot);key=(schedule_key(pending),locally_reset(self.reset_snapshot)) if pending else None
             if key!=self._active_reset_key:
                 self.dashboard_page='reset' if reset_has_priority(self.reset_snapshot) else 'tokens';self._active_reset_key=key
-            container=QWidget();container.setFixedHeight(DASH_HEIGHT+TodayTokens.HEIGHT+2)
+            from quota_history import visible_anomaly
+            warning=visible_anomaly(self.token_snapshot,self.windows)
+            container=QWidget()
             stack=QVBoxLayout(container);stack.setContentsMargins(0,0,0,0);stack.setSpacing(2)
-            cards=QWidget();cards.setFixedHeight(DASH_HEIGHT);row=QHBoxLayout(cards);row.setContentsMargins(0,0,0,0);row.setSpacing(6);stack.addWidget(cards)
-            quota=QuotaSummary(self.windows,self.quota_caption,progress_cache=self._ring_values);quota.expand.connect(self.show_quota_details)
+            cards=QWidget();row=QHBoxLayout(cards);row.setContentsMargins(0,0,0,0);row.setSpacing(6);stack.addWidget(cards)
+            quota=QuotaSummary(self.windows,self.quota_caption,progress_cache=self._ring_values,anomaly=warning);quota.expand.connect(self.show_quota_details)
+            cards.setFixedHeight(quota.height());container.setFixedHeight(quota.height()+TodayTokens.HEIGHT+2)
             quota.resetDue.connect(self._quota_reset_due);row.addWidget(quota,1)
             self.ring_kinds=['quota']*len(quota.items)+['time','tokens']
             deck=CardDeck(self.dashboard_page,self.token_snapshot,self.reset_snapshot,self.reset_error_details or self.reset_feed_error,self.reset_busy,token_busy=self.token_busy,token_range=self.token_range)
@@ -711,7 +718,7 @@ class CompactBubble(Bubble):
             self.deck=deck
             deck.selected.connect(self.select_dashboard)
             deck.token_range_changed.connect(self.select_token_range)
-            row.addWidget(deck,1);daily=TodayTokens(self.token_snapshot,selected=self.dashboard_page=='tokens' and self.token_range=='day');self.today_tokens_card=daily
+            row.addWidget(deck,1,Qt.AlignmentFlag.AlignTop);daily=TodayTokens(self.token_snapshot,selected=self.dashboard_page=='tokens' and self.token_range=='day');self.today_tokens_card=daily
             daily.activated.connect(self.show_today_tokens);stack.addWidget(daily);self.add(container)
             if self.expanded:
                 from detail_sections import DetailsTabs
@@ -810,11 +817,11 @@ class CompactBubble(Bubble):
         self.layout.setContentsMargins(0,2,0,2);self.layout.setSpacing(0)
         self.content.setFixedWidth(WIDTH if self.show_quota else WIDTH-45)
         cluster=QWidget();cluster.setFixedHeight(40);row=QHBoxLayout(cluster);row.setContentsMargins(0,0,0,0);row.setSpacing(5)
-        circle_style='QToolButton{border:1px solid #e0d9e6;border-radius:20px;background:#fcfafc;}QToolButton:hover{background:#eee8f3;}QToolButton:pressed{background:#e4dbea;}'
+        circle_style='QToolButton{border:0;border-radius:20px;background:#fcfafc;}QToolButton:hover{background:#eee8f3;}QToolButton:pressed{background:#e4dbea;}'
         from quick_actions import action_info
         key,title,icon=action_info(self.capsule_action)
         shortcut=action_button(icon,title,keyboard=True);shortcut.setObjectName('island_shortcut');shortcut.setFixedSize(40,40);shortcut.setIconSize(QSize(18,18))
-        shortcut.setStyleSheet(circle_style+'QToolButton:focus{border:2px solid #8b78a6;}')
+        shortcut.setStyleSheet(circle_style+'QToolButton:focus{border:0;background:#eee8f3;}')
         shortcut.clicked.connect(self.shortcutRequested.emit);row.addWidget(shortcut);self.shortcut_button=shortcut
         if key=='refresh':shortcut.set_busy(self.refresh_busy)
         self.status_indicator.set_island(True);self.island=StatusIsland(self.status_indicator)

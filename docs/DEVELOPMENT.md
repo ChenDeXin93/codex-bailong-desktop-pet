@@ -16,7 +16,7 @@ Git不保存大型动画。安装正式版本后，在设置中下载高清素�
 
 最终EXE另做离线TLS初始化自检，要求证书和主机名校验开启。构建工具会保留解释器SSL实现依赖的附属数据文件；不要用关闭验证来替代补齐运行依赖。
 
-`python build_release.py` 仅构建应用目录，不改变本机安装。公开发布时显式运行 `python build_release.py --package`，生成默认轻量载荷、程序小包及一键部署EXE；完整Windows下载ZIP还需加入部署文档并验证。`python check_bundle.py` 比对编译模块。输出与缓存不提交Git。
+`python build_release.py` 仅构建应用目录，不改变本机安装。公开发布前先构建并校验完整Windows包、program.zip / program.json及 SHA256SUMS，再运行 `build_card_only.package()` 生成仅卡片安装包和独立轻量资源。仅卡片安装包需先验证素材ID、载荷清单和所有文件校验值；轻量资源以 materials-ID 预发布单独上传，软件稳定版随后发布。`python check_bundle.py` 比对编译模块。输出与缓存不提交Git。
 
 程序小包只省略明确匹配的动画素材，所有程序/运行库/字体来自新包。软件Release须同时提供完整Windows ZIP、program.zip、program.json、合并SHA256SUMS；旧客户端首次迁移、新安装及素材不兼容使用完整包。高清按内容ID单独发布为预发布且不设Latest，不能让资源标签取代软件稳定版。
 

@@ -80,8 +80,11 @@ def windows_from_limits(limits):
         if not isinstance(minutes, (int, float)) or minutes <= 0:
             continue
         name = {300: '5小时', 10080: '一周'}.get(minutes, f'{minutes:g}分钟')
-        windows.append({'name': name, 'remaining': round(100-used, 1),
-                        'resetsAt': item.get('resetsAt', item.get('resets_at'))})
+        window={'name': name, 'remaining': round(100-used, 1),
+                'resetsAt': item.get('resetsAt', item.get('resets_at'))}
+        plan=limits.get('planType',limits.get('plan_type'))
+        if plan:window['plan']=str(plan).lower()[:40]
+        windows.append(window)
     return windows
 
 
