@@ -83,7 +83,7 @@ class StorageTests(unittest.TestCase):
 
 class ProgramMigrationTests(unittest.TestCase):
     def setUp(self):
-        self.tmp=tempfile.TemporaryDirectory();self.base=Path(self.tmp.name)
+        self.tmp=tempfile.TemporaryDirectory();self.base=Path(self.tmp.name).resolve()
         self.env=patch.dict(os.environ,{'LOCALAPPDATA':str(self.base/'user')});self.env.start()
         self.source=self.base/'old/BailongEnhanced';self.target=self.base/'new/BailongEnhanced'
         self.name='1.1.0-before';folder=self.source/'versions'/self.name;folder.mkdir(parents=True)
