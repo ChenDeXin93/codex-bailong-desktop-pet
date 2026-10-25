@@ -403,7 +403,6 @@ class DailyReport(QWidget):
             model_group=QWidget();self.model_layout=QVBoxLayout(model_group);self.model_layout.setContentsMargins(0,0,0,0);self.model_layout.setSpacing(4)
             self._add_model_rows(series);content.addWidget(model_group)
             self.body_height=163+min(4,max(1,len(series['models'])))*43
-        self.scroll.setWidget(body);self.layout.addWidget(self.scroll,1);self.scroll.show()
         self.body_height+=30
         if self.readout:
             self.readout.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Fixed)
@@ -425,6 +424,9 @@ class DailyReport(QWidget):
         foot.setVisible(self.page!='cycle')
         content.addWidget(foot)
         content.addStretch()
+        # Attach once the complete body exists. Showing the scroll area earlier
+        # leaves later cards pending ShowToParent, so their height is omitted.
+        self.scroll.setWidget(body);self.layout.addWidget(self.scroll,1);self.scroll.show()
         # Measure the whole overview, including wrapped book/source notes.
         # Models reuse this canvas and scroll only when their rows overflow it.
         self._building=False

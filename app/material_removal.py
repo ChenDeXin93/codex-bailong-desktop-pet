@@ -7,16 +7,24 @@ from desktop_core import atomic_json
 def removal_plan(store,include_embedded=None):
     if not store.catalog:raise MaterialError('当前素材没有可验证的目录，不能自动移除')
     include_embedded=getattr(sys,'frozen',False) if include_embedded is None else include_embedded
-    roots=[]
-    for tier,spec in store.catalog['tiers'].items():
-        roots.append((checked(store.cache,tier+'/'+spec['id']),spec))
-    if include_embedded:roots.append((store.base,store.catalog['tiers']['light']))
-    plan=[]
+    roots=[];catalogs=[store.catalog]
+    bundled=getattr(store,'bundled_catalog',None) or store.catalog
+    previous=getattr(store,'patch_previous',None)
+    if previous and previous.get('catalog'):catalogs.append(previous['catalog'])
+    if bundled not in catalogs:catalogs.append(bundled)
+    for catalog in catalogs:
+        for tier,spec in catalog['tiers'].items():
+            roots.append((checked(store.cache,tier+'/'+spec['id']),spec))
+    if include_embedded:roots.append((store.base,bundled['tiers']['light']))
+    plan=[];seen=set()
     for root,spec in roots:
         for entry in spec['files']:
             # Keep the tiny manifest as metadata; only actual animation bytes.
             if Path(entry['path']).suffix.lower() not in ('.webp','.webm','.png'):continue
             p=checked(root,entry['path'])
+            key=(str(root),entry['path'])
+            if key in seen:continue
+            seen.add(key)
             if p.is_file():
                 s=p.stat();plan.append(dict(root=str(root),name=entry['path'],bytes=s.st_size,mtime=s.st_mtime_ns))
     return plan

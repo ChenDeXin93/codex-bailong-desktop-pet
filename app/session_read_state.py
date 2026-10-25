@@ -51,6 +51,8 @@ def is_subagent_metadata(metadata):
 
 def subagent_sessions(home,ids):
     """Identify only proven child threads; missing metadata never hides a chat."""
+    from codex_connection import is_wsl_source
+    if is_wsl_source(home):return set()
     ids=list(dict.fromkeys(session_id(sid) for sid in ids if sid))
     if not ids:return set()
     try:
@@ -99,6 +101,8 @@ def read_unread_sessions(home):
 def read_tracking_probe(home):
     """Verify current marker shape and an actual read-only publication query."""
     from connection_health import sample
+    from codex_connection import is_wsl_source
+    if is_wsl_source(home):return sample('degraded','wsl_logs_only')
     home=Path(home)
     if read_unread_sessions(home) is None:
         return sample('unavailable','read_schema' if (home/'.codex-global-state.json').exists() else 'read_missing')

@@ -22,14 +22,16 @@ class MaterialJob(QThread):
         except Exception:self.failed.emit('素材准备失败，继续使用原画质')
 
 class MaterialController(QObject):
-    changed=Signal(object);ready=Signal(str,object);idle=Signal();removeRequested=Signal()
+    changed=Signal(object);ready=Signal(str,object);idle=Signal();removeRequested=Signal();rollbackRequested=Signal()
     def __init__(self,store,parent=None):
         super().__init__(parent);self.store=store;self.job=None;self.closing=False
         self.state=dict(phase='idle',message='',downloaded=0,total=0)
     def snapshot(self):
-        return dict(self.state,current=self.store.current,lightCached=self.store.known_available('light'),hdCached=self.store.known_available('hd'),supported=bool(self.store.catalog),busy=self.job is not None)
+        return dict(self.state,current=self.store.current,lightCached=self.store.known_available('light'),hdCached=self.store.known_available('hd'),supported=bool(self.store.catalog),busy=self.job is not None,canRollback=bool(self.store.patch_previous))
     def publish(self,**changes):self.state.update(changes);self.changed.emit(self.snapshot())
     def request(self,tier):
+        updates=getattr(self.parent(),'updates',None)
+        if updates and (updates.job or updates.state['phase']=='pending'):self.publish(message='请先完成当前更新');return False
         if self.closing or self.job or self.state['phase']=='pending' or tier not in ('light','hd'):return False
         if tier==self.store.current and self.store.known_available(tier):self.publish(message='当前已使用所选画质');return False
         self.publish(phase='verifying' if self.store.known_available(tier) else 'downloading',message='正在准备素材…',downloaded=0,total=0)
@@ -74,6 +76,7 @@ class MaterialPanel(QWidget):
         super().__init__(parent);self.controller=controller
         layout=QVBoxLayout(self);layout.setContentsMargins(0,0,0,0)
         self.summary=QLabel();self.summary.setWordWrap(True);layout.addWidget(self.summary)
+        self.rollback=QPushButton('回退动画补丁');self.rollback.clicked.connect(controller.rollbackRequested.emit);layout.addWidget(self.rollback)
         from settings_controls import SlidingSegments
         row=QHBoxLayout();self.choice=SlidingSegments([('轻量 512px','light'),('高清 720px','hd')]);row.addWidget(self.choice,1)
         self.action=QPushButton();row.addWidget(self.action);self.cancel_button=QPushButton('取消');row.addWidget(self.cancel_button);layout.addLayout(row)
@@ -86,6 +89,7 @@ class MaterialPanel(QWidget):
         self.choice.currentIndexChanged.connect(lambda:self.refresh(controller.snapshot()));self.action.clicked.connect(lambda:controller.request(self.choice.currentData()));self.cancel_button.clicked.connect(controller.cancel)
         controller.changed.connect(self.refresh);self.refresh(controller.snapshot())
     def refresh(self,s):
+        self.rollback.setVisible(bool(s.get('canRollback')));self.rollback.setEnabled(not s['busy'])
         self.summary.setText('当前：'+({'hd':'高清 720px','light':'轻量 512px'}.get(s['current'],'仅卡片')))
         tier=self.choice.currentData();busy=s['busy'] or s['phase']=='pending'
         self.choice.setEnabled(not busy);self.action.setEnabled(s['supported'] and not busy and tier!=s['current'])

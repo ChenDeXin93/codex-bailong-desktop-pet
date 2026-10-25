@@ -1,3 +1,7 @@
+当前推荐入口：v1.0.1 程序补丁安装器（不含动画）。已有素材可复用，新用户在设置中下载。
+https://github.com/Wunsch2048/codex-bailong-desktop-pet/releases/tag/v1.0.1
+以下为完整功能与历史安装说明，旧版包名以对应 Release 为准。
+
 Codex&GPT桌宠数据中心｜Windows x64
 本包版本 v1.0.0。首次安装请下载完整 Windows ZIP；支持程序小包的旧版客户端可通过应用内更新升级。以下设置分类针对当前版。
 原项目来源：https://github.com/jingh12312-rgb/bailong-desktop-pet

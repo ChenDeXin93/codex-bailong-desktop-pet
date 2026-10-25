@@ -33,6 +33,14 @@ class QuotaHistoryTests(unittest.TestCase):
         self.assertEqual(rows[0]['per_percent'],10)
         self.assertEqual(rows[0]['change'],-50)
         self.assertEqual(rows,summarize_cycles(self.db,self.start+WEEK+172900))
+    def test_estimate_starts_at_five_observed_percentage_points_not_total_spent(self):
+        s=self.start
+        store(self.db,s+1,s+WEEK,60,plan='pro');store(self.db,s+100,s+WEEK,56,plan='pro')
+        self.token(s+50,1000)
+        self.assertIsNone(summarize_cycles(self.db,s+101)[0]['estimated_total'])
+        store(self.db,s+200,s+WEEK,55,plan='pro')
+        row=summarize_cycles(self.db,s+201)[0]
+        self.assertEqual(row['estimated_total'],20000);self.assertFalse(row['eligible'])
     def test_model_change_and_extra_reset_are_not_direct_peers(self):
         self.cycle(self.start);self.cycle(self.start+WEEK,600,'model-b')
         rows=summarize_cycles(self.db,self.start+WEEK+172900)

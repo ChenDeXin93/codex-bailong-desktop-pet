@@ -122,7 +122,7 @@ class QuotaCompareView(QWidget):
         self.readout.setMinimumHeight(28);layout.addWidget(self.readout)
         self.plot.hoverText.connect(lambda value:self.readout.setText(value or '深色已用 / 浅色推测总量'))
         self.quality=text_label();self.quality.setWordWrap(True);layout.addWidget(self.quality)
-        self.note=text_label('本机记录推测。模型、缓存及其他设备使用会影响结果。');self.note.setWordWrap(True);layout.addWidget(self.note)
+        self.note=text_label('已记录额度下降至少 5 个百分点后推测总量；两轮均达到 20 个百分点，且套餐、主模型等条件相近时对比。缓存及其他设备使用会影响估算。');self.note.setWordWrap(True);layout.addWidget(self.note)
     def set_snapshot(self,snapshot):
         self.history=snapshot.get('quota_history') or {};self.cycles=self.history.get('cycles') or []
         if self.selected_id not in {c['id'] for c in self.cycles}:self.selected_id=self.cycles[0]['id'] if self.cycles else None

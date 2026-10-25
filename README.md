@@ -2,9 +2,13 @@
 
 ![文章海报](docs/media/cover.png)
 
-一只陪你使用 Codex 的 Windows 白龙桌宠：在桌面查看任务状态、接收完成提醒、追踪账户额度和 Token 用量。基于 [jingh12312-rgb/bailong-desktop-pet](https://github.com/jingh12312-rgb/bailong-desktop-pet) 持续改造，当前公开版本 **v1.0.0**。
+一只陪你使用 Codex 的 Windows 白龙桌宠：在桌面查看任务状态、接收完成提醒、追踪账户额度和 Token 用量。基于 [jingh12312-rgb/bailong-desktop-pet](https://github.com/jingh12312-rgb/bailong-desktop-pet) 持续改造，当前公开版本 **v1.0.1**。
 
-**[下载安装包](https://github.com/Wunsch2048/codex-bailong-desktop-pet/releases/latest)** · [快速部署](docs/快速部署说明.txt) · [全部新增功能](docs/新增功能说明.txt) · [开发说明](docs/DEVELOPMENT.md) · [迭代历史](docs/迭代历史.txt)
+**[下载程序安装器](https://github.com/Wunsch2048/codex-bailong-desktop-pet/releases/tag/v1.0.1)** [查看更新](https://github.com/Wunsch2048/codex-bailong-desktop-pet/releases/latest) | [快速部署](docs/快速部署说明.txt) | [全部新增功能](docs/新增功能说明.txt) | [开发说明](docs/DEVELOPMENT.md) | [迭代历史](docs/迭代历史.txt)
+
+### v1.0.1 程序补丁
+
+新增 [WSL Codex 接入](docs/WSL.md)，补齐独立动画补丁更新与额度对比的观察门槛，修复数据面板切页高度。首次安装默认只有卡片，人物素材按需下载；已有素材保留。WSL 尚待真实发行版反馈，详见 [更新说明](docs/releases/v1.0.1.md)。
 
 ### v1.0.0 更新
 

@@ -44,8 +44,12 @@ class PathsJob(QThread):
     def __init__(self,values,parent=None):super().__init__(parent);self.values=values
     def run(self):
         from codex_connection import validate_paths
-        try:self.result.emit(validate_paths(self.values))
-        except (OSError,ValueError) as error:self.failed.emit(str(error))
+        try:
+            if self.values.get('operation')=='list_wsl':
+                from wsl_codex import distributions
+                self.result.emit(distributions())
+            else:self.result.emit(validate_paths(self.values))
+        except (OSError,ValueError,RuntimeError) as error:self.failed.emit(str(error))
 
 class SettingsDialog(QDialog):
     def __init__(self,pet,embedded=False,lazy=False):
@@ -145,7 +149,7 @@ class SettingsDialog(QDialog):
         self.startup=SwitchRow('登录 Windows 时启动');connection.addRow(self.startup)
         self.field_tabs['startup']=self._building_index;self.field_titles['startup']='开机启动'
         self.startup.toggled.connect(lambda:self.edited('startup'))
-        self.codex_startup=SwitchRow('随 Codex 启动');connection.addRow(self.codex_startup)
+        self.codex_startup=SwitchRow('随 Windows Codex 桌面端启动');connection.addRow(self.codex_startup)
         self.field_tabs['codex_startup']=self._building_index;self.field_titles['codex_startup']='随 Codex 启动'
         self.codex_startup.toggled.connect(lambda:self.edited('codex_startup'))
         note=QLabel('登录时运行轻量监听；识别 Codex 桌面端，不依赖 Codex++。手动退出桌宠后，本次 Codex 使用期间不再拉起。可另行开启关闭联动。');note.setWordWrap(True);note.setStyleSheet(f'font-size:11px;color:{MUTED};');connection.addRow(note)
@@ -167,20 +171,32 @@ class SettingsDialog(QDialog):
         self.path_toggle=QPushButton('连接路径与检测报告');self.path_toggle.setCheckable(True);connection.addRow(self.path_toggle)
         path_body=QWidget();paths=QFormLayout(path_body);paths.setContentsMargins(0,4,0,4)
         from codex_connection import saved_paths,data_home
-        saved=saved_paths();self.path_fields={}
+        saved=saved_paths();self.path_fields={};self.native_path_rows=[];self.path_form=paths
+        self.path_source=SlidingSegments([('Windows','windows'),('WSL','wsl')]);self.path_source.setCurrentIndex(self.path_source.findData(saved.get('source') or 'windows'),False);paths.addRow('连接来源',self.path_source)
         for key,title in [('home','Codex 数据目录'),('cli','Codex CLI 程序')]:
             row=QWidget();layout=QHBoxLayout(row);layout.setContentsMargins(0,0,0,0)
             field=QLineEdit(saved.get(key,''));field.setPlaceholderText('留空自动识别');field.setAccessibleName(title);self.path_fields[key]=field;layout.addWidget(field,1)
             browse=QPushButton('选择…');browse.clicked.connect(lambda checked=False,k=key:self.choose_path(k));layout.addWidget(browse);paths.addRow(title,row)
+            self.native_path_rows.append(row)
+        self.wsl_body=QWidget();wsl_form=QFormLayout(self.wsl_body);wsl_form.setContentsMargins(0,0,0,0)
+        distro_row=QWidget();distro_layout=QHBoxLayout(distro_row);distro_layout.setContentsMargins(0,0,0,0)
+        self.wsl_distro=QComboBox();self.wsl_distro.setAccessibleName('WSL 发行版')
+        self.wsl_distro.addItem(saved.get('wsl_distro') or '请刷新发行版',saved.get('wsl_distro',''));distro_layout.addWidget(self.wsl_distro,1)
+        self.wsl_refresh=QPushButton('刷新发行版');self.wsl_refresh.clicked.connect(self.refresh_wsl_sources);distro_layout.addWidget(self.wsl_refresh);wsl_form.addRow('发行版',distro_row)
+        self.wsl_fields={};self._wsl_path=saved.get('wsl_path','')
+        for key,title,hint in [('wsl_user','Linux 用户','留空使用默认用户'),('wsl_home','Linux 数据目录','留空识别 CODEX_HOME'),('wsl_cli','Linux CLI 路径','留空自动识别 codex')]:
+            field=QLineEdit(saved.get(key,''));field.setPlaceholderText(hint);field.setAccessibleName(title);self.wsl_fields[key]=field;wsl_form.addRow(title,field)
+        paths.addRow(self.wsl_body)
         self.active_path=QLabel('当前生效目录：'+str(data_home()));self.active_path.setWordWrap(True);self.active_path.setStyleSheet(f'font-size:11px;color:{MUTED};');paths.addRow(self.active_path)
-        note=QLabel('保存后重启桌宠生效；环境变量优先。只修改本桌宠的路径，不更改 Codex 或登录凭据。');note.setWordWrap(True);note.setStyleSheet(f'font-size:11px;color:{MUTED};');paths.addRow(note)
+        note=QLabel('保存后重启桌宠生效。WSL 验证会启动所选发行版；使用 Linux 登录，Windows 数据独立保留。');note.setWordWrap(True);note.setStyleSheet(f'font-size:11px;color:{MUTED};');paths.addRow(note)
         row=QWidget();layout=QHBoxLayout(row);layout.setContentsMargins(0,0,0,0)
         self.save_paths_button=QPushButton('验证并保存路径');self.save_paths_button.clicked.connect(self.validate_paths);layout.addWidget(self.save_paths_button)
-        reset=QPushButton('改为自动识别');reset.clicked.connect(lambda:[field.clear() for field in self.path_fields.values()]);layout.addWidget(reset);paths.addRow(row)
+        reset=QPushButton('改为自动识别');reset.clicked.connect(self.clear_paths);layout.addWidget(reset);paths.addRow(row)
         self.path_status=QLabel();self.path_status.setWordWrap(True);paths.addRow(self.path_status)
         self.connection_text=QPlainTextEdit();self.connection_text.setReadOnly(True);self.connection_text.setMaximumHeight(140);self.connection_text.setAccessibleName('最近一次连接检测报告')
         self.connection_text.setPlainText('点击“检测连接与额度”生成只读报告；不会发送对话或消耗 Token。');paths.addRow(self.connection_text)
         self.paths_card=AnimatedDisclosure(path_body);connection.addRow(self.paths_card);self.path_toggle.toggled.connect(self.paths_card.set_expanded)
+        self.path_source.currentIndexChanged.connect(self.path_source_changed);self.path_source_changed()
 
     def build_page_3(self):
         pet=self.pet
@@ -222,7 +238,7 @@ class SettingsDialog(QDialog):
         self.section(maintenance,'诊断与数据','维护操作立即执行；不属于设置草稿。')
         for title,slot in [('打开配置与聊天记录目录',pet.open_data),('导出诊断报告（不含对话和密钥）',pet.export_diagnostics),('备份设置（不含密钥与对话）',pet.backup_settings),('恢复设置备份',pet.restore_settings),('清理历史版本与备份（先预览）',pet.cleanup_installations)]:
             button=QPushButton(title);button.clicked.connect(slot);maintenance.addRow(button)
-        maintenance.addRow(QLabel('当前版本 '+VERSION))
+        maintenance.addRow(QLabel('程序版本 '+VERSION))
 
     def section(self,form,title,note):
         name=QLabel(title);name.setStyleSheet(f'font-size:13px;font-weight:500;color:{PRIMARY};background:transparent;padding:2px;margin-top:10px;');form.addRow(name)
@@ -232,20 +248,44 @@ class SettingsDialog(QDialog):
         if key=='home':value=QFileDialog.getExistingDirectory(self,'选择 Codex 数据目录',self.path_fields[key].text())
         else:value,_=QFileDialog.getOpenFileName(self,'选择 Codex CLI（不是桌面主程序）',self.path_fields[key].text(),'程序 (*.exe);;所有文件 (*)')
         if value:self.path_fields[key].setText(value)
+    def path_source_changed(self,*args):
+        wsl=self.path_source.currentData()=='wsl'
+        if 'codex_exit' in self.fields:self.fields['codex_exit'].setEnabled(not wsl)
+        for row in self.native_path_rows:self.path_form.setRowVisible(row,not wsl)
+        self.wsl_body.setVisible(wsl)
+        if self.paths_card.expanded:self.paths_card.refresh_content()
+    def path_values(self):
+        values={key:field.text().strip().strip('"') for key,field in {**self.path_fields,**self.wsl_fields}.items()}
+        return dict(values,source=self.path_source.currentData(),wsl_distro=self.wsl_distro.currentData() or '',wsl_path=self._wsl_path)
+    def clear_paths(self):
+        fields=self.wsl_fields if self.path_source.currentData()=='wsl' else self.path_fields
+        for field in fields.values():field.clear()
+    def refresh_wsl_sources(self):
+        if self.path_job and self.path_job.isRunning():return
+        self.wsl_refresh.setEnabled(False);self.save_paths_button.setEnabled(False);self.path_status.setText('正在查找已安装的 WSL 发行版…')
+        self.path_job=PathsJob(dict(operation='list_wsl'),self);self.path_job.result.connect(self.wsl_sources_done);self.path_job.failed.connect(self.path_status.setText)
+        self.path_job.finished.connect(lambda:[self.wsl_refresh.setEnabled(True),self.save_paths_button.setEnabled(True)]);self.path_job.start()
+    def wsl_sources_done(self,names):
+        selected=self.wsl_distro.currentData();self.wsl_distro.clear()
+        for name in names:self.wsl_distro.addItem(name,name)
+        if selected in names:self.wsl_distro.setCurrentIndex(self.wsl_distro.findData(selected))
+        if not names:self.wsl_distro.addItem('未找到发行版','')
+        self.path_status.setText('请选择发行版，再验证并保存。' if names else '尚未安装 WSL 发行版。')
     def validate_paths(self):
         if self.path_job and self.path_job.isRunning():return
-        values={key:field.text().strip().strip('"') for key,field in self.path_fields.items()}
+        values=self.path_values()
         self.save_paths_button.setEnabled(False);self.path_status.setText('正在验证路径与 CLI 版本…')
         self.path_job=PathsJob(values,self);self.path_job.result.connect(self.paths_done);self.path_job.failed.connect(self.path_status.setText)
         self.path_job.finished.connect(lambda:self.save_paths_button.setEnabled(True));self.path_job.start()
     def paths_done(self,values):
-        if any(self.path_fields[key].text().strip().strip('"')!=self.path_job.values[key] for key in self.path_fields):
+        if self.path_values()!=self.path_job.values:
             self.path_status.setText('验证期间输入已改变，请重新验证；未保存。');return
         from desktop import STATE_DIR
         from codex_connection import save_paths
         try:save_paths(values,STATE_DIR/'connection-paths.json')
         except OSError:self.path_status.setText('路径保存失败，输入仍保留。');return
-        for key,value in values.items():self.path_fields[key].setText(value)
+        for key,field in {**self.path_fields,**self.wsl_fields}.items():field.setText(values.get(key,''))
+        self._wsl_path=values.get('wsl_path','')
         self.path_status.setText('已验证并保存，重启桌宠后生效；当前监测继续使用原路径。')
     def update_refresh_state(self,key,busy):
         if key not in self.refresh_buttons:return

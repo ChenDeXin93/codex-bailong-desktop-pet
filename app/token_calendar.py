@@ -33,7 +33,7 @@ class TokenUsageIndex:
         # Each selected source has an independent index; retain the old database
         # untouched rather than guessing which mixed historical rows belong here.
         import hashlib,os
-        source=os.path.normcase(str(self.home.resolve()))
+        source=__import__('codex_connection').source_identity(self.home)
         key=hashlib.sha256(source.encode('utf-8')).hexdigest()[:16]
         self.path=self.path.with_name(self.path.stem+'-source-'+key+self.path.suffix)
         self.format_known={}
@@ -60,6 +60,7 @@ class TokenUsageIndex:
 
     def import_legacy(self,db):
         """Attribute retained history using file/session metadata; never move the old DB."""
+        if __import__('codex_connection').is_wsl_source(self.home):return True
         if not self.legacy_path.is_file():return True
         savepoint=False
         try:

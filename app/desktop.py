@@ -68,12 +68,14 @@ class DesktopPet(EnhancedPet):
         from update_controller import UpdateController
         self.updates=UpdateController(VERSION,STATE_DIR/'updates',self,allow_auto=monitor)
         self.updates.installerReady.connect(self.install_app_update)
+        self.updates.animationReady.connect(self.queue_animation_update)
         self.updates.changed.connect(self.app_update_state)
         self._update_exit_pending=False
         from material_controller import MaterialController
         self.materials=MaterialController(self.material_store,self)
         self.materials.ready.connect(self.queue_material)
         self.materials.removeRequested.connect(self.remove_materials)
+        self.materials.rollbackRequested.connect(self.rollback_animation_update)
         self._material_exit_pending=False
         self.reactions.set_actions(item['id'] for item in all_items(self.manifest))
         self.bubble.reportRequested.connect(self.open_report)
@@ -119,6 +121,8 @@ class DesktopPet(EnhancedPet):
         self.schedule_animation()
 
     def poll_codex_presence(self):
+        from codex_connection import is_wsl_source
+        if is_wsl_source():return
         if not self.settings.get('codex_exit') or self._codex_polling or self._codex_closing:return
         self._codex_polling=True
         def read():
@@ -933,16 +937,36 @@ class DesktopPet(EnhancedPet):
         self._pending_material=(tier,Path(root))
         if self._desktop_hidden or not self.settings.get('character_visible',True):self.apply_material()
 
+    def queue_animation_update(self,ready):
+        if self.materials.job or self._pending_material:
+            self.updates.install_failed('素材操作正在进行，请完成后重试动画补丁');return
+        if ready['root'] is None or self.settings.get('character','builtin')!='builtin':
+            try:
+                from animation_updates import commit
+                if ready['root'] is not None:ready['store'].activate(ready['tier'],ready['root'])
+                commit(ready);self.material_store=ready['store'];self.materials.store=self.material_store
+                self.updates.animation_applied(ready);self.materials.changed.emit(self.materials.snapshot())
+            except (OSError,ValueError) as error:self.updates.install_failed(str(error))
+            return
+        self._pending_animation=ready
+        self.queue_material(ready['tier'],ready['root'])
+
+    def rollback_animation_update(self):
+        if self.materials.job or self._pending_material:return
+        self.updates.rollback_animation(self.material_store.patch_previous)
+
     def apply_material(self):
         if not self._pending_material:return False
         tier,root=self._pending_material;self._pending_material=None
+        animation=getattr(self,'_pending_animation',None);self._pending_animation=None
+        store=animation['store'] if animation else self.material_store
         old=(self.asset_root,self.manifest,self.idles,self.variants)
         try:
             m=json.loads((root/'素材清单.json').read_text(encoding='utf-8'))
             # Fully verified in the worker. Probe the entry frame before committing preference.
             from PIL import Image
             with Image.open(root/(m['idle'].get('playbackFile') or m['idle']['file'])) as im:im.load()
-            self.material_store.activate(tier,root)
+            store.activate(tier,root)
             self.sustained.cancel()
             if self.player:self.player.close()
             self.player=StreamPlayer();self.player.ended=True
@@ -953,12 +977,19 @@ class DesktopPet(EnhancedPet):
             missing=self._materials_missing;self._materials_missing=False
             if missing:
                 self.apply_settings(dict(character_visible=True,bubble=True));self.idle()
+            if animation:
+                from animation_updates import commit
+                commit(animation);self.material_store=store;self.materials.store=store
+                self.updates.animation_applied(animation)
             self.materials.applied();return True
         except (OSError,ValueError,KeyError) as error:
             self.asset_root,self.manifest,self.idles,self.variants=old
+            if animation:self.updates.install_failed('动画补丁切换失败：'+str(error))
             self.materials.failed('画质切换失败：'+str(error));return False
     def remove_materials(self):
         from material_removal import removal_plan
+        if self.updates.job or self.updates.state['phase']=='pending':
+            self.materials.failed('请先完成当前更新');return
         if self.materials.job or self._pending_material:return
         try:plan=removal_plan(self.material_store)
         except (OSError,ValueError) as exc:self.materials.failed(str(exc));return
@@ -1024,7 +1055,7 @@ class DesktopPet(EnhancedPet):
         value.update(shared_body_tail_decode=True,nonblocking_decoder_cancel=True,adaptive_animation_clock=True,high_resolution_frame_clock=True,frame_clock_resolution=time.get_clock_info('perf_counter').resolution,idle_movement_timer_ms=1000,
             decode_runtime=STATS.snapshot(),animation_wakeups=self.animation_wakeups,movement_wakeups=self.movement_wakeups,decode_error=self.decode_error)
         value.update(material_tiers=True,material_default='light',material_current=self.material_store.current,
-            program_only_updates=True,program_update_material_verification=True,program_update_full_fallback=True,
+            program_only_updates=True,animation_only_updates=True,animation_patch_rollback=True,report_page_stable_height=True,wsl_integration=True,wsl_source=bool(getattr(self.activity,'wsl',False)),program_update_material_verification=True,program_update_full_fallback=True,
             material_resolution=(720 if self.material_store.current=='hd' else 512) if self.material_store.current else None,material_hd_cached=self.material_store.known_available('hd'),
             material_content_id=self.material_store.catalog['tiers'][self.material_store.current]['id'] if self.material_store.catalog and self.material_store.current else None,
             material_switch_pending=bool(self._pending_material))
@@ -1083,10 +1114,14 @@ class DesktopPet(EnhancedPet):
             if not self._material_exit_pending:self._material_exit_pending=True;self.materials.idle.connect(self.close)
             event.ignore();return
         if self.settings_dialog and self.settings_dialog.path_job and self.settings_dialog.path_job.isRunning():
-            if not self.settings_dialog.path_job.wait(6500):event.ignore();return
+            if not getattr(self,'_path_exit_pending',False):
+                self._path_exit_pending=True;self.settings_dialog.path_job.finished.connect(self.close)
+            event.ignore();return
         if self.settings_dialog and self.settings_dialog.connection_job and self.settings_dialog.connection_job.isRunning():
             self.settings_dialog.connection_job.cancel.set()
-            if not self.settings_dialog.connection_job.wait(8000):event.ignore();return
+            if not getattr(self,'_connection_exit_pending',False):
+                self._connection_exit_pending=True;self.settings_dialog.connection_job.finished.connect(self.close)
+            event.ignore();return
         if self.settings_dialog and self.settings_dialog.job and self.settings_dialog.job.isRunning():
             self.say('素材导入仍在进行，请完成后退出。',5000);event.ignore();return
         if hasattr(self,'updates') and not self.updates.shutdown():

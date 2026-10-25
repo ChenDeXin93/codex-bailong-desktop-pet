@@ -41,6 +41,9 @@ class ActivityThread(QThread):
         super().__init__(parent)
         self.stop=threading.Event()
         self.tail=RolloutTail(home)
+        from codex_connection import is_wsl_source
+        from wsl_codex import state_dir
+        self.wsl=is_wsl_source(self.tail.home);self.session_dir=state_dir(STATE_DIR,self.tail.home)
         self.token_index=TokenUsageIndex(STATE_DIR/'token-usage.sqlite3',home);self.last_token_scan=0;self.token_wake=threading.Event();self.token_reader=None
         self.week_cycle=None
         self.token_runs=RefreshRuns()
@@ -53,6 +56,9 @@ class ActivityThread(QThread):
         self.targets=ActivityTargets();self.context_lock=threading.Lock();self.displayed=();self.visited=();self.last_active_scan=-20
     def run(self):
         from codex_live_status import LiveStatusReader
+        if self.wsl:
+            from wsl_codex import LogOnlyLiveReader
+            LiveStatusReader=LogOnlyLiveReader
         self.live_reader=LiveStatusReader(self.stop,
             lambda sid,on,turn:self.live_events.put(('compacting',sid,on,turn)),
             lambda sid,reason,turn:self.live_events.put(('waiting',sid,reason,turn)),
@@ -60,6 +66,15 @@ class ActivityThread(QThread):
             lambda sid,status,turn:self.live_events.put(('terminal',sid,status,turn)))
         self.live_reader.start()
         while not self.stop.is_set():
+            if self.wsl:
+                from wsl_codex import running,unc_parts
+                if not running(unc_parts(self.tail.home)[0]):
+                    if time.monotonic()-self.last_health_scan>=10:
+                        self.last_health_scan=time.monotonic()
+                        self.event.emit(dict(kind='connection_health',capabilities={key:dict(state='unavailable',code='wsl_stopped') for key in ('tasks','completion','tokens','compaction')}))
+                    if self.token_wake.is_set() and (self.token_reader is None or not self.token_reader.is_alive()):
+                        self.token_wake.clear();self.token_reader=threading.Thread(target=self.read_tokens,name='BailongWslUnavailable',daemon=True);self.token_reader.start()
+                    self.stop.wait(1);continue
             if time.monotonic()-self.last_presence_scan>=5:
                 self.last_presence_scan=time.monotonic()
                 if self.presence_reader is None or not self.presence_reader.is_alive():
@@ -67,12 +82,12 @@ class ActivityThread(QThread):
             try:
                 from session_read_state import session_id,active_conversations,conversation_names
                 from enhanced_core import Session
-                try:pending=json.loads((STATE_DIR/'task-notifications.json').read_text(encoding='utf-8')).get('unread',[])
+                try:pending=json.loads((self.session_dir/'task-notifications.json').read_text(encoding='utf-8')).get('unread',[])
                 except (OSError,ValueError,AttributeError):pending=[]
                 pending=[k for k in pending if isinstance(k,list) and len(k)==2 and all(isinstance(v,str) for v in k)]
                 seeds=[]
                 if time.monotonic()-self.last_active_scan>=15:
-                    self.last_active_scan=time.monotonic();seeds=active_conversations(self.tail.home)
+                    self.last_active_scan=time.monotonic();seeds=[] if self.wsl else active_conversations(self.tail.home)
                     existing={session_id(s) for s in self.tail.reducer.sessions}
                     for e in seeds:
                         if session_id(e['session']) not in existing:
@@ -97,7 +112,7 @@ class ActivityThread(QThread):
                         batch.extend(apply(target,value,turn))
                 if time.monotonic()-self.last_name_scan>=3:
                     self.last_name_scan=time.monotonic()
-                    ids=self.targets.choose('names',128);names=conversation_names(self.tail.home,ids)
+                    ids=self.targets.choose('names',128);names={} if self.wsl else conversation_names(self.tail.home,ids)
                     if names:
                         self.conversation_names.update(names)
                         self.conversation_names={sid:name for sid,name in self.conversation_names.items() if sid in self.targets.entries}
@@ -150,6 +165,9 @@ class ActivityThread(QThread):
         self.event.emit({'kind':'token_busy','busy':True,'run_id':run})
         terminal=None;health=None
         try:
+            if self.wsl:
+                from wsl_codex import running,unc_parts
+                if not running(unc_parts(self.tail.home)[0]):raise RuntimeError('WSL source unavailable')
             with self.context_lock:cycle=self.week_cycle
             options=dict(stop=self.stop.is_set)
             if cycle:options['cycle']=cycle
@@ -234,7 +252,9 @@ class EnhancedPet(Pet):
         self.bubble.close()
         self.bubble.deleteLater()
         self.bubble=HeadBubble(self)
-        self.bubble.status_indicator.set_store(CONFIG.with_name('task-notifications.json'))
+        from codex_connection import session_state_dir
+        self.session_dir=session_state_dir(STATE_DIR)
+        self.bubble.status_indicator.set_store(self.session_dir/'task-notifications.json')
         self.bubble.quotaRefreshRequested.connect(self.refresh_quota)
         self.bubble.resetRefreshRequested.connect(self.refresh_reset_feed)
         self.bubble.tokenRefreshRequested.connect(self.refresh_tokens)
@@ -249,7 +269,7 @@ class EnhancedPet(Pet):
         self.sound=self.settings.get('sound',True)
         self._interaction_sound=False
         self.silent_notifier=None
-        self.local_reset_evidence=LocalResetEvidence(STATE_DIR/'local-reset-evidence.json')
+        self.local_reset_evidence=LocalResetEvidence(self.session_dir/'local-reset-evidence.json')
         self.quota_windows=[]
         self.quota_observed=0
         self.quota_source=''

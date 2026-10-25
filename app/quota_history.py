@@ -169,7 +169,7 @@ def summarize_cycles(db,now=None,complete=True,pending=False):
             estimated_total=estimate,per_percent=estimate/100 if estimate else None,
             estimate_low=round(observed*100/(drop+1)) if valid else None,
             estimate_high=round(observed*100/max(1,drop-1)) if valid else None,
-            observed_tokens=observed,drop=round(max(0,drop),1),sample_count=len(samples),
+            observed_tokens=observed,drop=round(max(0,drop),1),sample_count=len(samples),distinct_readings=len({s[2] for s in samples}),
             complete=bool(complete and not pending),fresh=fresh,corrected=bool(c.get('corrected')),
             model=model,model_share=share,output_share=output,plan=c['plan'],eligible=eligible,
             change=None,baseline=None,comparison_reason='尚无可比历史'))
@@ -177,7 +177,15 @@ def summarize_cycles(db,now=None,complete=True,pending=False):
         if not item['plan']:
             item['comparison_reason']='套餐记录不足，暂不比较';continue
         if not item['eligible']:
-            item['comparison_reason']='模型混用较多' if item['model_share']<.7 and item['drop']>=20 else '观察覆盖不足，继续记录'
+            if not item['complete']:reason='历史记录尚未完整，暂不比较'
+            elif not item['fresh']:reason='额度记录待刷新，暂不比较'
+            elif item['corrected']:reason='额度曾回调，本轮暂不比较'
+            elif item['drop']<20:reason=f"再记录 {20-item['drop']:g} 个百分点后可比较"
+            elif item['distinct_readings']<3:reason='需至少 3 个不同余额读数后比较'
+            elif not item['model'] or item['model']=='未识别模型' or item['output_share'] is None:reason='模型或输入输出记录不完整'
+            elif item['model_share']<.7:reason='模型混用较多，主模型占比需达到 70%'
+            else:reason='有效用量记录不足，暂不比较'
+            item['comparison_reason']=reason
             continue
         peers=[old for old in result[:i] if old['closed'] and old['eligible'] and
             old['model']==item['model'] and abs(old['model_share']-item['model_share'])<=.15 and

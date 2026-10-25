@@ -13,5 +13,32 @@
     "1.9.9 → 2.0.0"
   ],
   "legacyVersionsPreserved": true,
-  "helper": "release_version.py"
+  "helper": "release_version.py",
+  "publicPatchRule": "程序补丁与动画补丁共用 GitHub 公开发布序列；单独发布推进一位，同时发布共用同一版本。",
+  "patchDisplayNames": {
+    "program": "程序补丁包 {version}",
+    "animation": "动画补丁包 {version}"
+  },
+  "publicPatchExamples": [
+    {
+      "version": "1.0.1",
+      "packages": [
+        "程序补丁包 1.0.1"
+      ]
+    },
+    {
+      "version": "1.0.2",
+      "packages": [
+        "动画补丁包 1.0.2"
+      ]
+    },
+    {
+      "version": "1.0.3",
+      "packages": [
+        "程序补丁包 1.0.3",
+        "动画补丁包 1.0.3"
+      ]
+    }
+  ],
+  "assetNaming": "用户可见名称使用补丁类型和公开版本；底层文件名保持客户端兼容，内容 ID 仅用于素材校验。"
 }
