@@ -1,14 +1,14 @@
-当前推荐入口：v1.0.1 程序补丁安装器（不含动画）。已有素材可复用，新用户在设置中下载。
-https://github.com/Wunsch2048/codex-bailong-desktop-pet/releases/tag/v1.0.1
-以下为完整功能与历史安装说明，旧版包名以对应 Release 为准。
-
 Codex&GPT桌宠数据中心｜Windows x64
-本包版本 v1.0.0。首次安装请下载完整 Windows ZIP；支持程序小包的旧版客户端可通过应用内更新升级。以下设置分类针对当前版。
+当前公开稳定版 v1.0.0。可选择完整安装或仅卡片安装。
+下载发布页：https://github.com/Wunsch2048/codex-bailong-desktop-pet/releases/tag/v1.0.0
+完整安装：bailong-desktop-pet-1.0.0-windows-x64.zip
+仅卡片安装：bailong-desktop-pet-1.0.0-cards-windows-x64.zip
+源码中的 WSL 和独立动画补丁协议尚未随安装包发布。
 原项目来源：https://github.com/jingh12312-rgb/bailong-desktop-pet
 增强版仓库：https://github.com/Wunsch2048/codex-bailong-desktop-pet
 
 首次安装 / 从旧版升级
-1. 从 Releases 下载完整 Windows ZIP并完整解压。
+1. 从上述 v1.0.0 发布页选择完整或仅卡片安装 ZIP，完整解压。
 2. 双击对应版本“一键部署.exe”，无需Python或管理员权限。
 3. 安装器关闭旧桌宠、备份设置/聊天/统计、校验并启动新版本，就绪后切换入口；保留回退。不要关闭正在部署的窗口。
 4. 本机安装并登录Codex，发送消息后自动识别连接，通常无需重启Codex。新版设置→Codex→检测连接与额度；旧版位于连接页。
