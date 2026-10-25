@@ -36,7 +36,7 @@ class MaterialStoreTests(unittest.TestCase):
             self.assertTrue((Path(folder)/'BailongEnhanced/额度查询日志.jsonl').is_file())
             self.assertFalse((Path(folder)/'immutable-program').exists())
     def setUp(self):
-        self.tmp=tempfile.TemporaryDirectory();self.root=Path(self.tmp.name);self.app=self.root/'app-root';self.state=self.root/'state'
+        self.tmp=tempfile.TemporaryDirectory();self.root=Path(self.tmp.name).resolve();self.app=self.root/'app-root';self.state=self.root/'state'
         (self.app/'app').mkdir(parents=True);self.state.mkdir();self.source=self.root/'hd';self.source.mkdir()
         self.payload={'素材清单.json':b'{"character":"fixture"}','quality/action.webp':b'high-definition-fixture'}
         self.files=[dict(path=p,bytes=len(data),sha256=hashlib.sha256(data).hexdigest()) for p,data in self.payload.items()]

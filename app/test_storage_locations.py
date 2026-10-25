@@ -6,7 +6,7 @@ import storage_locations as locations
 
 class StorageTests(unittest.TestCase):
     def setUp(self):
-        self.tmp=tempfile.TemporaryDirectory();self.root=Path(self.tmp.name)
+        self.tmp=tempfile.TemporaryDirectory();self.root=Path(self.tmp.name).resolve()
         self.env=patch.dict(os.environ,{'LOCALAPPDATA':str(self.root/'user')});self.env.start()
         self.source=self.root/'old';self.source.mkdir();(self.source/'nested').mkdir();(self.source/'nested/a.bin').write_bytes(b'animation')
         self.target=self.root/'new'
