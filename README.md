@@ -2,9 +2,9 @@
 
 ![文章海报](docs/media/cover.png)
 
-一只陪你使用 Codex 的 Windows 白龙桌宠：在桌面查看任务状态、接收完成提醒、追踪账户额度和 Token 用量。基于 [jingh12312-rgb/bailong-desktop-pet](https://github.com/jingh12312-rgb/bailong-desktop-pet) 持续改造，当前公开版本 **v1.0.1**。
+一只陪你使用 Codex 的 Windows 白龙桌宠：在桌面查看任务状态、接收完成提醒、追踪账户额度和 Token 用量。基于 [jingh12312-rgb/bailong-desktop-pet](https://github.com/jingh12312-rgb/bailong-desktop-pet) 持续改造，当前公开版本 **v1.1.0**。
 
-**[下载程序补丁安装器 1.0.1](https://github.com/Wunsch2048/codex-bailong-desktop-pet/releases/tag/v1.0.1)** | [查看更新](https://github.com/Wunsch2048/codex-bailong-desktop-pet/releases/latest) | [快速部署](docs/快速部署说明.txt) | [全部新增功能](docs/新增功能说明.txt) | [开发说明](docs/DEVELOPMENT.md) | [迭代历史](docs/迭代历史.txt)
+**[下载程序补丁安装器 1.1.0](https://github.com/Wunsch2048/codex-bailong-desktop-pet/releases/tag/v1.1.0)** | [查看更新](https://github.com/Wunsch2048/codex-bailong-desktop-pet/releases/latest) | [快速部署](docs/快速部署说明.txt) | [全部新增功能](docs/新增功能说明.txt) | [开发说明](docs/DEVELOPMENT.md) | [迭代历史](docs/迭代历史.txt)
 
 安装器不含人物动画，新用户先获得卡片程序，可在设置中下载；已有素材和设置保留。
 
@@ -17,13 +17,27 @@
 
 社区版本由对应作者独立维护、测试和发布，安装说明与平台问题反馈请前往对应仓库。主仓库发布的安装包和更新补丁适用于 Windows x64。
 
-### v1.0.1 程序补丁
+### v1.1.0 程序补丁
+
+- 首次安装可选程序目录，已有程序和已下载动画可分别迁移，升级与启动入口沿用新位置。
+- 修复重启后日志恢复误报“记录受限”、画质配置结构异常导致启动失败，以及孤立额度回升导致整轮暂停估算。
+- 改善久未打开卡片及内部切页时的跳闪，工作三球的最外层旋转调整为 2.5 倍，内部动作节拍不变。
+
+这是累计程序补丁，只需最新一份，无需逐个安装旧补丁；已有有效动画继续复用。详见[完整更新说明](docs/releases/v1.1.0.md)。
+
+| 工作状态动效 | 数据面板切换 |
+| --- | --- |
+| ![三球工作状态](docs/media/status-orbit-1.1.0.gif) | ![数据面板切换](docs/media/data-pages-1.1.0.gif) |
+
+动图为原生矢量合成时间及隔离窗口演示，不作为屏幕帧率证明。
+
+### v1.0.1 程序补丁（历史）
 
 - 额度对比按用量、总量变化和历史图分区，区分 5 个百分点估算门槛与 20 个百分点对比条件，完整规则按需展开。
 - 新增 [WSL Codex 接入](docs/WSL.md)，支持 Linux 日志、Token 与 CLI 额度查询；真实 WSL 实机验证仍待反馈。
 - 补齐程序与动画补丁的独立更新流程，修复额度对比切回概览时面板变短。
 
-[完整更新说明](docs/releases/v1.0.1.md)。本次发布包适用于 Windows x64；其他平台请查看上方社区版本入口。
+[该历史版更新说明](docs/releases/v1.0.1.md)。当前安装请使用页面顶部的最新入口。
 
 ![额度对比新排版](docs/media/quota-compare-1.0.1.png)
 
