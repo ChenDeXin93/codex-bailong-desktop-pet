@@ -56,6 +56,55 @@ class QuotaHistoryTests(unittest.TestCase):
         self.assertEqual(rows[1]['kind'],'extra')
         self.assertEqual(rows[1]['start'],self.start+3)
         self.assertEqual(rows[1]['samples'][0][2],90)
+    def test_isolated_small_rise_replays_without_poisoning_saved_cycle(self):
+        s=self.start;deadline=s+WEEK
+        for offset,remaining,source in [(1,80,'log'),(100,60,'live'),
+                (105,62,'log'),(108,60,'log'),(120,55,'live')]:
+            store(self.db,s+offset,deadline,remaining,source,plan='pro')
+        self.token(s+50,1000);self.token(s+110,500)
+        row=summarize_cycles(self.db,s+121)[0]
+        self.assertFalse(row['corrected']);self.assertFalse(row['rise_pending'])
+        self.assertEqual(row['estimated_total'],6000);self.assertTrue(row['eligible'])
+        self.assertEqual(row['sample_count'],4)
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM quota_observations').fetchone()[0],5)
+        self.assertEqual(summarize_cycles(self.db,s+121)[0],row)
+    def test_unconfirmed_rise_pauses_estimate_then_recovers_after_lower_read(self):
+        s=self.start;deadline=s+WEEK
+        for offset,remaining in [(1,80),(100,60),(105,62)]:
+            store(self.db,s+offset,deadline,remaining,plan='pro')
+        self.token(s+50,1000)
+        row=summarize_cycles(self.db,s+106)[0]
+        self.assertTrue(row['rise_pending']);self.assertFalse(row['corrected'])
+        self.assertIsNone(row['estimated_total']);self.assertFalse(row['eligible'])
+        self.assertIn('待确认',row['comparison_reason'])
+        store(self.db,s+108,deadline,60,plan='pro')
+        row=summarize_cycles(self.db,s+109)[0]
+        self.assertFalse(row['rise_pending']);self.assertFalse(row['corrected'])
+        self.assertEqual(row['estimated_total'],5000)
+    def test_confirmed_small_rise_still_blocks_a_misleading_estimate(self):
+        s=self.start;deadline=s+WEEK
+        for offset,remaining in [(1,80),(100,60),(105,64),(110,63)]:
+            store(self.db,s+offset,deadline,remaining,plan='pro')
+        self.token(s+50,1000)
+        rows=summarize_cycles(self.db,s+111)
+        self.assertEqual(len(rows),1);self.assertTrue(rows[0]['corrected'])
+        self.assertFalse(rows[0]['rise_pending']);self.assertIsNone(rows[0]['estimated_total'])
+    def test_duplicate_timestamp_cannot_confirm_a_rise(self):
+        s=self.start;deadline=s+WEEK
+        rows=partition([(s+1,deadline,60,'live','pro',None,''),
+            (s+2,deadline,62,'log','',None,''),
+            (s+2,deadline+120,62,'log','',None,''),
+            (s+3,deadline,60,'live','pro',None,'')])
+        self.assertEqual(len(rows),1);self.assertFalse(rows[0].get('corrected',False))
+        self.assertNotIn('rise_candidate',rows[0])
+    def test_older_window_does_not_consume_a_pending_refill(self):
+        s=self.start;deadline=s+WEEK
+        rows=partition([(s+1,deadline,30,'log','',None,''),
+            (s+2,deadline,90,'log','',None,''),
+            (s+3,deadline-3600,90,'log','',None,''),
+            (s+4,deadline,89,'log','',None,'')])
+        self.assertEqual(len(rows),2);self.assertEqual(rows[1]['kind'],'extra')
+        self.assertEqual(rows[1]['start'],s+2)
     def test_reset_deadline_jitter_does_not_split_one_cycle(self):
         rows=partition([(self.start+100,self.start+WEEK,90,'log','',None,''),
             (self.start+200,self.start+WEEK+120,85,'log','',None,''),

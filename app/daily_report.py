@@ -237,11 +237,22 @@ class DailyReport(QWidget):
         frame=None
         if self.isVisible() and not self._animating and not self.follow.active and motion_enabled():
             if self.plot:self.plot.freeze_reveal()
-            frame=self.page_fade.snapshot(self.scroll)
+            frame=self.page_fade.snapshot_region(self.surface,self.scroll.geometry()) if self.page_fade.isVisible() else self.page_fade.snapshot(self.scroll)
         self.page_fade.clear()
         self.page=page;self.rebuild();self.sync_geometry();self.layout.activate()
-        if frame is not None:self.page_fade.present(frame,self.scroll.geometry())
-        self.chart_entry()
+        if frame is not None:
+            # Settle and paint the live page first. The old frame then fades
+            # over a ready target while its chart reveal runs beneath it.
+            widgets=[self.scroll]+self.scroll.findChildren(QWidget)
+            for widget in reversed(widgets):
+                widget.ensurePolished()
+                if widget.layout():widget.layout().activate()
+            QApplication.sendPostedEvents(None,QEvent.Type.LayoutRequest)
+            self.page_fade.present(frame,None,self.scroll.geometry(),fade_out=True)
+            self.chart_entry()
+            # Start from a painted zero-progress chart underneath the overlay.
+            self.scroll.repaint()
+        else:self.chart_entry()
     def set_period(self,period):
         if self.period==period:
             if period in self.range_buttons:self.range_buttons[period].setChecked(True)
@@ -547,9 +558,15 @@ class DailyReport(QWidget):
                 self._pending_rebuild=False;self.rebuild()
                 if self.plot:self.plot.begin_reveal()
             self.fraction=1.;self.sync_geometry();self.surface.move(self.PAD,self.PAD);self.surface.show()
-            self.refresh_button.resume_motion('surface')
-            self._frame=None;self._input_passthrough(False)
         finally:self.setUpdatesEnabled(enabled)
+        # Keep the prepared raster underneath until the live, possibly long-idle
+        # child hierarchy has painted at its final native size. The old order
+        # dropped _frame before this first real paint, exposing stale/blank
+        # scroll-area backing pixels for one compositor frame on Windows.
+        self.surface.repaint()
+        if self.scroll and self.scroll.isVisible():self.scroll.repaint()
+        self.refresh_button.resume_motion('surface')
+        self._frame=None;self._input_passthrough(False)
         self.repaint()
         if guarded:
             present_barrier();self.follow.park(self.follow.shield)

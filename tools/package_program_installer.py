@@ -19,7 +19,7 @@ def compiler_paths():
 
 def build(program,version,destination,icon):
     program=Path(program).resolve();destination=Path(destination).resolve();destination.mkdir(parents=True,exist_ok=True)
-    if not re.fullmatch(r'\d+\.[0-9]\.[0-9]',version):raise ValueError('Invalid public version')
+    if not re.fullmatch(r'(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)',version):raise ValueError('Invalid public version')
     with zipfile.ZipFile(program) as archive:
         descriptor=json.loads(archive.read('program-update.json'))
         manifest=json.loads(archive.read('payload-manifest.json'))

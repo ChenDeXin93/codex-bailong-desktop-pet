@@ -7,7 +7,7 @@ import unittest
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QImage,QPainter
 
-from status_motion import GlyphMotion,busy_liquid_parts,idle_liquid_parts,BUSY_BREATH_SECONDS,BUSY_ROTATION_SECONDS,IDLE_ROTATION_SECONDS,BUSY_PAIRS
+from status_motion import GlyphMotion,busy_liquid_parts,idle_liquid_parts,BUSY_BREATH_SECONDS,BUSY_ROTATION_SECONDS,IDLE_ROTATION_SECONDS,BUSY_PAIRS,BUSY_GLOBAL_TURNS,BUSY_OUTER_SPEED
 from status_paint import paint_liquid_glyph
 
 
@@ -68,7 +68,8 @@ class LiquidStatusTests(unittest.TestCase):
             shift=math.atan2(b.y-8,b.x-8)-math.atan2(a.y-8,a.x-8)
             shifts.append(math.atan2(math.sin(shift),math.cos(shift)))
             self.assertAlmostEqual(math.hypot(a.x-8,a.y-8),math.hypot(b.x-8,b.y-8))
-        self.assertTrue(all(0<angle<.03 for angle in shifts))
+        expected=math.tau*BUSY_GLOBAL_TURNS*BUSY_OUTER_SPEED*(.99-.96)*BUSY_BREATH_SECONDS/BUSY_ROTATION_SECONDS
+        for angle in shifts:self.assertAlmostEqual(angle,expected)
         self.assertLess(max(shifts)-min(shifts),1e-8)
 
     def test_neck_changes_pair_and_initiator_without_dragging_receiver(self):

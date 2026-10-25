@@ -91,7 +91,7 @@ def import_step(db,files,stop=lambda:False,seconds=.3,max_bytes=64*1024*1024):
 
 
 def partition(samples):
-    """A delayed/stale high reading must not create a phantom extra reset."""
+    """Confirm rises before they affect a cycle; concurrent logs can lag."""
     cycles=[];current=None;last=None
     for sample in samples:
         stamp,deadline,remaining,source,plan,boundary,kind=sample
@@ -99,8 +99,8 @@ def partition(samples):
         if last and stamp<=last[0]:continue
         change='';candidate=None
         if current:
-            candidate=current.pop('refill_candidate',None)
             if deadline<current['deadline']-1800:continue  # An old concurrent log arrived late.
+            candidate=current.pop('rise_candidate',None)
             if plan and current['plan'] and plan!=current['plan']:change='changed'
             elif deadline>current['deadline']+1800:
                 if stamp>=current['deadline']-120:change='natural'
@@ -108,11 +108,17 @@ def partition(samples):
                 else:change='changed'  # A shifted window without a refill is not a proven bonus.
             elif boundary and boundary>current['start']+300 and boundary>(last[0] if last else 0):
                 change=kind or 'extra'
-            elif candidate and remaining>=candidate[2]-2 and stamp-candidate[0]<=1800:
-                change='extra';boundary=candidate[0]
-            elif remaining-last[2]>=10:
-                # A refill needs another observation confirming the new level.
-                current['refill_candidate']=sample
+            elif (candidate and 0<stamp-candidate[0]<=1800 and
+                    remaining>last[2]+1 and remaining>=candidate[2]-2):
+                if candidate[2]-last[2]>=10:
+                    change='extra';boundary=candidate[0]
+                else:
+                    # A sustained small rise makes the slope unreliable, but
+                    # an isolated older snapshot must not poison the whole week.
+                    current['corrected']=True
+                    current['samples'].append(candidate)
+            elif remaining>last[2]+1:
+                current['rise_candidate']=sample
                 continue
         if current is None or change:
             if current:
@@ -125,8 +131,6 @@ def partition(samples):
                 samples=[],closed=False,end=None)
             cycles.append(current)
             if candidate and boundary==candidate[0]:current['samples'].append(candidate)
-        # Small percentage corrections are retained as a quality flag, not resets.
-        if last and not change and remaining>last[2]+1:current['corrected']=True
         if plan:current['plan']=plan
         current['samples'].append(sample);last=sample
     return cycles
@@ -154,7 +158,9 @@ def summarize_cycles(db,now=None,complete=True,pending=False):
         observed,observed_records=token_span(db,first[0],last[0])
         drop=first[2]-last[2]
         fresh=closed or now-last[0]<=900
-        valid=bool(complete and not pending and fresh and not c.get('corrected') and drop>=5 and observed>0)
+        rise_pending=bool(c.get('rise_candidate'))
+        valid=bool(complete and not pending and fresh and not rise_pending and
+            not c.get('corrected') and drop>=5 and observed>0)
         estimate=round(observed*100/drop) if valid else None
         mix=token_span(db,first[0],last[0],True)
         model=mix[0][0] if mix else ''
@@ -170,7 +176,7 @@ def summarize_cycles(db,now=None,complete=True,pending=False):
             estimate_low=round(observed*100/(drop+1)) if valid else None,
             estimate_high=round(observed*100/max(1,drop-1)) if valid else None,
             observed_tokens=observed,drop=round(max(0,drop),1),sample_count=len(samples),distinct_readings=len({s[2] for s in samples}),
-            complete=bool(complete and not pending),fresh=fresh,corrected=bool(c.get('corrected')),
+            complete=bool(complete and not pending),fresh=fresh,corrected=bool(c.get('corrected')),rise_pending=rise_pending,
             model=model,model_share=share,output_share=output,plan=c['plan'],eligible=eligible,
             change=None,baseline=None,comparison_reason='尚无可比历史'))
     for i,item in enumerate(result):
@@ -179,7 +185,8 @@ def summarize_cycles(db,now=None,complete=True,pending=False):
         if not item['eligible']:
             if not item['complete']:reason='历史记录尚未完整，暂不比较'
             elif not item['fresh']:reason='额度记录待刷新，暂不比较'
-            elif item['corrected']:reason='额度曾回调，本轮暂不比较'
+            elif item['rise_pending']:reason='额度回升待确认，暂不比较'
+            elif item['corrected']:reason='额度读数曾回升，本轮暂不比较'
             elif item['drop']<20:reason=f"再记录 {20-item['drop']:g} 个百分点后可比较"
             elif item['distinct_readings']<3:reason='需至少 3 个不同余额读数后比较'
             elif not item['model'] or item['model']=='未识别模型' or item['output_share'] is None:reason='模型或输入输出记录不完整'

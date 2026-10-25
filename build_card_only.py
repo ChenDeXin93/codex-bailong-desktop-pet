@@ -32,7 +32,7 @@ def package(source,output):
         for path in sorted(card.rglob('*')):
             if path.is_file():z.write(path,path.relative_to(card))
     name=f'白龙卡片-{version}-一键部署'
-    subprocess.run([sys.executable,str(ROOT/'tools/pyinstaller_keep_files.py'),'--windowed','--onefile',
+    subprocess.run([sys.executable,str(ROOT/'本地实装/pyinstaller_keep_files.py'),'--windowed','--onefile',
         '--icon',str(ROOT/'app/branding/bailong.ico'),'--name',name,'--distpath',str(output),
         '--workpath',str(work/'installer'),'--specpath',str(work),'--exclude-module','imageio_ffmpeg',
         *ssl_runtime_data(),'--add-data',str(payload)+';.','app/installer.py'],cwd=ROOT,check=True)

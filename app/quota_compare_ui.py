@@ -102,7 +102,8 @@ def cycle_messages(c,history):
     if history.get('pending'):estimate_note='正在补齐历史记录'
     elif not c.get('complete'):estimate_note='记录受限，暂不估算'
     elif not c.get('fresh'):estimate_note='刷新额度后再估算'
-    elif c.get('corrected'):estimate_note='余额曾回调，暂停估算'
+    elif c.get('rise_pending'):estimate_note='额度回升待确认'
+    elif c.get('corrected'):estimate_note='额度读数曾回升，暂停估算'
     elif estimate:estimate_note='每 1% ≈ '+compact_tokens(round(c['per_percent']))+' Token' if c.get('per_percent') else '基于本机额度与 Token 记录估算'
     elif drop<5:
         estimate_note=(f'再观察 {5-drop:g} 个百分点可估算总量' if not c['closed'] else f'仅观察 {drop:g} 个百分点，未达估算门槛')
@@ -112,7 +113,8 @@ def cycle_messages(c,history):
     if history.get('pending'):title='历史记录整理中';reason='整理完成后再比较总量。'
     elif not c.get('complete'):title='记录受限，暂不能比较';reason='补齐本机记录后再判断总量变化。'
     elif not c.get('fresh'):title='等待最新额度';reason='刷新后再比较总量。'
-    elif c.get('corrected'):title='余额回调，暂停比较';reason='这轮余额不连续，避免误判总量变化。'
+    elif c.get('rise_pending'):title='额度回升待确认';reason='等待后续读数确认，再继续估算与比较。'
+    elif c.get('corrected'):title='额度读数回升，暂停比较';reason='多次读数确认回升，这轮暂不用于总量比较。'
     elif not c.get('plan'):title='缺少套餐记录';reason='需要确认同一套餐，避免把套餐差异当作缩水。'
     elif drop<20:
         title='尚不能判断总量变化';show_coverage=True
@@ -173,7 +175,7 @@ class QuotaCompareView(QWidget):
         self.rules_button=QToolButton();self.rules_button.setText('估算与对比条件  ›');self.rules_button.setCheckable(True);self.rules_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.rules_button.setAccessibleName('展开估算与历史对比条件');self.rules_button.setStyleSheet('QToolButton{'+FONT_CSS+f'border:0;border-radius:6px;padding:4px 2px;color:{PRIMARY};font-size:11px;}}QToolButton:hover{{background:{PANEL};}}QToolButton:pressed{{background:{SELECTED};}}');layout.addWidget(self.rules_button,0,Qt.AlignmentFlag.AlignLeft)
         rules=QWidget();box=QVBoxLayout(rules);box.setContentsMargins(0,0,0,0);box.setSpacing(6)
-        self.note=text_label('估算总量：已记录的额度下降达到 5 个百分点，且对应 Token 记录完整、额度新鲜、余额无回调。');self.note.setWordWrap(True);box.addWidget(self.note)
+        self.note=text_label('估算总量：已记录的额度下降达到 5 个百分点，且对应 Token 记录完整、额度新鲜、读数连续。');self.note.setWordWrap(True);box.addWidget(self.note)
         conditions=text_label('比较历史：两轮均观察至少 20 个百分点、至少 3 个不同余额读数；同套餐、相近主模型与输入输出比例，且重置类型一致。');conditions.setWordWrap(True);box.addWidget(conditions)
         caveat=text_label('主模型至少占 70%。缓存、任务差异和其他设备用量会影响估算，不能据此确认官方额度缩水。');caveat.setWordWrap(True);box.addWidget(caveat)
         self.quality=text_label();self.quality.setWordWrap(True);box.addWidget(self.quality)
@@ -231,7 +233,8 @@ class QuotaCompareView(QWidget):
         elif not c['complete']:parts.append('部分记录受限')
         elif c.get('cached'):parts.append('保留上次完整统计')
         elif not c['fresh']:parts.append('额度待刷新')
-        elif c.get('corrected'):parts.append('额度曾回调，本轮不推测')
+        elif c.get('rise_pending'):parts.append('额度回升待确认')
+        elif c.get('corrected'):parts.append('额度读数曾回升，本轮不推测')
         else:parts.append(f"已记录额度下降 {c['drop']:g} 个百分点")
         if c.get('per_percent'):parts.append('每 1% ≈ '+compact_tokens(round(c['per_percent']))+' Token')
         if c.get('model'):parts.append('主模型 '+c['model']+f"（{c.get('model_share',0):.0%}）")

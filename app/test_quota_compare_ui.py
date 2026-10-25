@@ -18,7 +18,7 @@ class QuotaComparePresentationTests(unittest.TestCase):
  def test_closed_cycle_does_not_tell_user_to_consume_more_past_quota(self):
   m=cycle_messages(row(closed=True),{});self.assertNotIn('再观察',m['reason']);self.assertIn('不能用于历史对比',m['reason'])
  def test_restricted_stale_corrected_and_missing_plan_have_specific_states(self):
-  for changes,expected in [({'complete':False},'受限'),({'fresh':False},'最新额度'),({'corrected':True},'回调'),({'plan':''},'套餐')]:
+  for changes,expected in [({'complete':False},'受限'),({'fresh':False},'最新额度'),({'rise_pending':True,'estimated_total':None},'待确认'),({'corrected':True},'回升'),({'plan':''},'套餐')]:
    m=cycle_messages(row(**changes),{});self.assertIn(expected,m['title']);self.assertFalse(m['show_coverage'])
  def test_real_change_is_labeled_as_estimate_not_official_quota(self):
   m=cycle_messages(row(drop=35,change=-30,baseline_count=2),{})

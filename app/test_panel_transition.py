@@ -72,8 +72,10 @@ class PanelTests(unittest.TestCase):
     def test_equal_sized_editor_pages_keep_widgets_and_have_no_resize(self):
         b=self.b;chat=QWidget();draft=QLineEdit(chat);draft.setText('draft')
         b.show_page('chat',chat);b.size_transition.complete();size=b.size()
-        b.show_page('settings',QWidget());self.assertFalse(b.size_transition.running);self.assertEqual(b.size(),size)
-        b.show_page('chat',chat);self.assertEqual(draft.text(),'draft')
+        b.show_page('settings',QWidget());self.assertTrue(b.size_transition.running);self.assertEqual(b.size(),size)
+        b.size_transition.complete();self.assertEqual(b.size(),size)
+        b.show_page('chat',chat);self.assertTrue(b.size_transition.running);self.assertEqual(b.size(),size)
+        b.size_transition.complete();self.assertEqual(draft.text(),'draft')
     def test_text_remains_dark_under_a_dark_system_palette(self):
         old=APP.palette();dark=QPalette(old)
         for role in (QPalette.ColorRole.WindowText,QPalette.ColorRole.Text,QPalette.ColorRole.ButtonText):dark.setColor(role,QColor('white'))

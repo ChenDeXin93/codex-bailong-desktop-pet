@@ -74,6 +74,17 @@ static class ProgramPatchBootstrap {
     }
     static string InstalledSource(string local) {
         var install=Path.Combine(local,"Programs","BailongEnhanced");
+        if(Environment.GetEnvironmentVariable("BAILONG_ISOLATED")!="1") {
+            using(var key=Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\BailongEnhanced")) {
+                if(key!=null) {
+                    var location=key.GetValue("InstallLocation") as string;
+                    var data=key.GetValue("DataLocation") as string;
+                    bool bound=!String.IsNullOrWhiteSpace(data) && String.Equals(Path.GetFullPath(data).TrimEnd('\\'),Path.Combine(local,"BailongEnhanced").TrimEnd('\\'),StringComparison.OrdinalIgnoreCase);
+                    bool legacy=String.IsNullOrWhiteSpace(data) && !String.IsNullOrWhiteSpace(location) && String.Equals(Path.GetFullPath(location).TrimEnd('\\'),Path.GetFullPath(install).TrimEnd('\\'),StringComparison.OrdinalIgnoreCase);
+                    if((bound || legacy) && !String.IsNullOrWhiteSpace(location) && Path.IsPathRooted(location) && String.Equals(Path.GetFileName(location.TrimEnd('\\')),"BailongEnhanced",StringComparison.OrdinalIgnoreCase)) install=Path.GetFullPath(location);
+                }
+            }
+        }
         var path=Path.Combine(install,"installations.json");
         if(!File.Exists(path)) return null;
         var current=Text(ReadJson(path),"current");
@@ -84,6 +95,12 @@ static class ProgramPatchBootstrap {
     static string FindMedia(string local,string old,string id,Dictionary<string,object> media) {
         var roots=new List<string>();
         if(old!=null) roots.Add(Path.Combine(old,"outputs","白龙桌宠素材"));
+        var pointer=Path.Combine(local,"BailongEnhanced","material-location.json");
+        if(File.Exists(pointer)) {
+            var value=ReadJson(pointer);var location=Text(value,"path");
+            if(Convert.ToInt32(value["schema"])!=1 || !Path.IsPathRooted(location)) throw new InvalidDataException("动画目录配置无效");
+            roots.Add(Safe(Path.GetFullPath(location),"light/"+id));
+        }
         roots.Add(Safe(Path.Combine(local,"BailongEnhanced","materials"),"light/"+id));
         foreach(var root in roots) {
             bool valid=true;

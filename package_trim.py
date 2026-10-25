@@ -4,7 +4,7 @@ import pefile
 
 OPTIONAL={'qpdf.dll','Qt6Pdf.dll','qtvirtualkeyboardplugin.dll','Qt6VirtualKeyboard.dll',
           'Qt6Quick.dll','Qt6Qml.dll','Qt6QmlMeta.dll','Qt6QmlModels.dll','Qt6QmlWorkerScript.dll','Qt6OpenGL.dll'}
-def qt_trim_plan(folder):
+def trim_qt(folder):
     folder=Path(folder).resolve();qt=folder/'_internal/PySide6'
     paths=[p for p in folder.rglob('*') if p.is_file() and p.suffix.lower() in ('.dll','.pyd','.exe')]
     imports={}
@@ -23,15 +23,7 @@ def qt_trim_plan(folder):
     removed=[]
     for p in sorted(removable):
         assert p.resolve().is_relative_to(qt.resolve()) and not p.is_symlink()
-        removed.append(dict(path=p.relative_to(folder).as_posix(),bytes=p.stat().st_size))
+        removed.append(dict(path=p.relative_to(folder).as_posix(),bytes=p.stat().st_size));p.unlink()
     removed_names={Path(x['path']).name.lower() for x in removed}
     assert not any(deps&removed_names for p,deps in imports.items() if p not in removable)
     return dict(passed=True,removed=removed,savedBytes=sum(x['bytes'] for x in removed),remainingNativeImportsVerified=True)
-
-def trim_qt(folder):
-    folder=Path(folder).resolve();result=qt_trim_plan(folder)
-    for record in result['removed']:
-        target=folder/record['path']
-        assert target.resolve().is_relative_to(folder) and not target.is_symlink()
-        target.unlink()
-    return result

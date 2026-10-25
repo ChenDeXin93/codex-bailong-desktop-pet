@@ -236,9 +236,11 @@ class SettingsDialog(QDialog):
             from update_widgets import UpdatePanel
             self.update_panel=UpdatePanel(pet.updates);maintenance.addRow(self.update_panel)
         self.section(maintenance,'诊断与数据','维护操作立即执行；不属于设置草稿。')
+        if hasattr(pet,'open_install_manager'):
+            button=QPushButton('程序位置与安装管理');button.clicked.connect(pet.open_install_manager);maintenance.addRow(button)
         for title,slot in [('打开配置与聊天记录目录',pet.open_data),('导出诊断报告（不含对话和密钥）',pet.export_diagnostics),('备份设置（不含密钥与对话）',pet.backup_settings),('恢复设置备份',pet.restore_settings),('清理历史版本与备份（先预览）',pet.cleanup_installations)]:
             button=QPushButton(title);button.clicked.connect(slot);maintenance.addRow(button)
-        maintenance.addRow(QLabel('程序版本 '+VERSION))
+        maintenance.addRow(QLabel('当前版本 '+VERSION))
 
     def section(self,form,title,note):
         name=QLabel(title);name.setStyleSheet(f'font-size:13px;font-weight:500;color:{PRIMARY};background:transparent;padding:2px;margin-top:10px;');form.addRow(name)

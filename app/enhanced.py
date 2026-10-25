@@ -11,6 +11,9 @@ import time
 from pathlib import Path
 
 # Companion watcher has no GUI, Qt initialization or animation resources.
+if __name__=='__main__' and '--cleanup-storage-migration' in sys.argv:
+    from storage_locations import cleanup_main
+    raise SystemExit(cleanup_main(sys.argv[sys.argv.index('--cleanup-storage-migration')+1]))
 if __name__=='__main__' and '--watch-codex' in sys.argv:
     from codex_startup import main as watch_codex
     raise SystemExit(watch_codex())

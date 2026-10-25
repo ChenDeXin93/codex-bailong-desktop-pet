@@ -866,6 +866,15 @@ class DesktopPet(EnhancedPet):
         try:self.codex_navigation.open(session)
         except OSError as error:self.say(str(error),6000)
     def open_data(self):QDesktopServices.openUrl(QUrl.fromLocalFile(str(STATE_DIR)))
+    def open_install_manager(self):
+        try:
+            from installer import checked_version,read_manifest
+            from storage_locations import install_root
+            root=install_root();m=read_manifest(root)
+            exe=checked_version(root,m.get('current',''))/'白龙安装管理.exe'
+            if not exe.is_file():raise OSError('当前没有已安装的维护程序，请使用安装器选择程序位置')
+            __import__('subprocess').Popen([str(exe),'--manage'],cwd=exe.parent,creationflags=0x08000000)
+        except (OSError,ValueError) as exc:QMessageBox.warning(self.settings_dialog,'安装管理',str(exc))
     def app_update_state(self,state):
         text='白龙桌宠 '+VERSION+(' · 有更新 '+state['latest'] if state['phase']=='available' else ' · 点击恢复 / 右键设置')
         if self.tray.toolTip()!=text:self.tray.setToolTip(text)

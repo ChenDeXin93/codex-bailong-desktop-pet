@@ -6,6 +6,8 @@ BUSY_RING_RADIUS=2.25
 BUSY_RING_STROKE=0.
 BUSY_BREATH_SECONDS=2.04
 BUSY_ROTATION_SECONDS=BUSY_BREATH_SECONDS*12
+BUSY_GLOBAL_TURNS=2  # One extra full orbit keeps the faster motion loop-closed.
+BUSY_OUTER_SPEED=2.5  # Only the steady outer orbit; exchange/adhesion timing stays unchanged.
 IDLE_ROTATION_SECONDS=18.
 BUSY_PAIRS=((1,2),(2,0),(0,1),(2,1),(1,0),(0,2))
 MORPH_SECONDS=.48
@@ -41,7 +43,7 @@ def busy_liquid_parts(elapsed):
     crossing=beat%2==0;progress=smootherstep((phase-.14)/.22)
     settle=math.sin(math.pi*max(0.,min(1.,(phase-.32)/.11)))**2
     base=math.ceil(beat/2)*math.pi+math.floor(beat/2)*math.tau/3
-    turn=math.tau*elapsed/BUSY_ROTATION_SECONDS+(math.floor(beat/2)+(0 if crossing else progress))*math.pi/3
+    turn=math.tau*BUSY_GLOBAL_TURNS*BUSY_OUTER_SPEED*elapsed/BUSY_ROTATION_SECONDS+(math.floor(beat/2)+(0 if crossing else progress))*math.pi/3
     points=[]
     for angle in (-math.pi/2,5*math.pi/6,math.pi/6):
         angle+=base+(0 if crossing else progress*math.tau/3+settle*.018)
