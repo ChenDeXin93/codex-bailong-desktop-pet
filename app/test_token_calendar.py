@@ -37,10 +37,33 @@ class TokenTests(unittest.TestCase):
         self.assertEqual(self.poll()['total'],190)
         (self.home/'archived_sessions').mkdir();self.path.rename(self.home/'archived_sessions'/self.path.name)
         self.assertEqual(self.poll()['total'],190)
+    def test_restart_after_non_token_tail_does_not_mark_valid_log_restricted(self):
+        self.write([token(1,100)])
+        self.assertFalse(self.poll()['partial'])
+        # A real session continues with completion/progress events while no new
+        # token counter is needed. A restarted reader resumes at the old offset.
+        self.write([dict(type='event_msg',payload=dict(type='task_complete'))],'a')
+        restarted=TokenUsageIndex(self.cache,self.home)
+        for _ in range(2):
+            result=restarted.poll(self.now)
+            self.assertFalse(result['partial'])
+            self.assertFalse(result['format_unknown'])
+            self.assertEqual(result['readable_files'],1)
+            self.assertEqual(result['all_total'],100)
     def test_month_boundary_excludes_old_cumulative_baseline(self):
         old=token(1,100);old['timestamp']=datetime(2026,9,30,23,59).astimezone().isoformat()
         self.write([old,token(1,160)]);self.assertEqual(self.poll()['total'],60)
         start,end=month_bounds(datetime(2028,2,3).timestamp());self.assertEqual((end-start).days,29)
+    def test_temporarily_unknown_header_can_recover_at_the_same_saved_offset(self):
+        unknown=json.dumps(dict(type='future_kind',payload={}))
+        known=json.dumps(dict(type='session_meta',payload=dict(id='fixture')))
+        width=max(len(unknown),len(known))
+        self.path.write_text(unknown.ljust(width)+'\n',encoding='utf-8')
+        self.assertTrue(self.poll()['format_unknown'])
+        self.path.write_text(known.ljust(width)+'\n',encoding='utf-8')
+        result=self.poll()
+        self.assertFalse(result['partial'])
+        self.assertFalse(result['format_unknown'])
     def test_counter_replay_and_truncation_do_not_inflate(self):
         self.write([token(1,150),token(2,120),token(3,180)]);self.assertEqual(self.poll()['total'],180)
         self.write([token(1,150)]);self.assertEqual(self.poll()['total'],180)

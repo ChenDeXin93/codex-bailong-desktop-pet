@@ -8,6 +8,14 @@ from material_store import MaterialStore,MaterialError,checked
 from app_updates import UpdateCancelled
 
 class MaterialStoreTests(unittest.TestCase):
+    def test_non_object_preferences_do_not_break_restart_or_overwrite_source(self):
+        for value in (None,[],"hd",0):
+            with self.subTest(value=value):
+                content=json.dumps(value).encode('utf-8');self.store.preference.write_bytes(content)
+                restored=MaterialStore(self.app,self.state)
+                self.assertEqual(restored.preferred,'light')
+                self.assertEqual(restored.current,'light')
+                self.assertEqual(self.store.preference.read_bytes(),content)
     def test_cached_display_hint_does_not_authorize_corrupt_materials(self):
         root=self.store.import_hd(self.source)
         self.assertTrue(self.store.known_available('hd'))

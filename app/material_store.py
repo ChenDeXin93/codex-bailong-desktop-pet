@@ -54,7 +54,10 @@ class MaterialStore:
                 for f in tier['files']:
                     checked(self.base,f['path'])
                     if not 0<f['bytes']<2**31 or len(f['sha256'])!=64:raise MaterialError('素材校验信息无效')
-        try:prefs=json.loads(self.preference.read_text(encoding='utf-8'));self.preferred=prefs['tier']
+        try:
+            prefs=json.loads(self.preference.read_text(encoding='utf-8'))
+            if not isinstance(prefs,dict):raise ValueError('画质偏好应为对象')
+            self.preferred=prefs['tier']
         except (OSError,ValueError,KeyError):prefs={};self.preferred='light'
         self.card_only=bool(prefs.get('cardOnly',False))
         if self.preferred not in ('light','hd'):self.preferred='light'
